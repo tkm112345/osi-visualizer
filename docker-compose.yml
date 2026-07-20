@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./backend
+    # 外部公開は不要。フロント(nginx)から backend:8080 で参照される。
+    # ローカルで直接叩きたい場合は下の ports のコメントを外す。
+    # ports:
+    #   - "8080:8080"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

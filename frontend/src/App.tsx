@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { decapsulate, encapsulate, fetchProtocols } from "./api";
-import type { Protocol, Step } from "./types";
+import type { Protocol, Step, Text } from "./types";
+import { pick, t, type Lang } from "./i18n";
 import LayerStack from "./components/LayerStack";
 import PacketDetail from "./components/PacketDetail";
 
@@ -13,6 +14,7 @@ interface Selection {
 const STEP_MS = 600;
 
 export default function App() {
+  const [lang, setLang] = useState<Lang>("ja");
   const [message, setMessage] = useState("Hello");
   const [srcIp, setSrcIp] = useState("192.168.0.10");
   const [dstIp, setDstIp] = useState("93.184.216.34");
@@ -141,37 +143,47 @@ export default function App() {
     ? activeSteps.find((s) => s.level === selection.level) ?? null
     : null;
 
-  // ドロップダウン用にカテゴリを出現順で並べる。
-  const categories: string[] = [];
+  // ドロップダウン用にカテゴリを出現順で並べる（英語名をキーにして安定化）。
+  const categories: Text[] = [];
   protocols.forEach((p) => {
-    if (!categories.includes(p.category)) categories.push(p.category);
+    if (!categories.some((c) => c.en === p.category.en)) categories.push(p.category);
   });
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>OSI 通信シミュレーター</h1>
-        <p className="subtitle">
-          送信ホスト（カプセル化 L7→L1）と受信ホスト（デカプセル化 L1→L7）で、
-          データがどう処理されるかを可視化します。各レイヤーをクリックすると詳細が見られます。
-        </p>
-        <p className="sim-note">
-          ⚠️ これは<strong>擬似シミュレーション</strong>です。実際にネットワークへパケットを送信することはありません。
-          宛先 IP は表示上のラベルで、通信は一切発生しません。
-        </p>
+        <div className="header-top">
+          <h1>{t("title", lang)}</h1>
+          <div className="lang-switch" role="group" aria-label={t("langLabel", lang)}>
+            <button
+              className={lang === "ja" ? "on" : ""}
+              onClick={() => setLang("ja")}
+            >
+              日本語
+            </button>
+            <button
+              className={lang === "en" ? "on" : ""}
+              onClick={() => setLang("en")}
+            >
+              English
+            </button>
+          </div>
+        </div>
+        <p className="subtitle">{t("subtitle", lang)}</p>
+        <p className="sim-note">{t("simNote", lang)}</p>
       </header>
 
       <section className="controls">
         <label>
-          プロトコル
+          {t("protocol", lang)}
           <select value={protocol} onChange={(e) => handleProtocolChange(e.target.value)}>
             {categories.map((cat) => (
-              <optgroup key={cat} label={cat}>
+              <optgroup key={cat.en} label={pick(cat, lang)}>
                 {protocols
-                  .filter((p) => p.category === cat)
+                  .filter((p) => p.category.en === cat.en)
                   .map((p) => (
                     <option key={p.key} value={p.key}>
-                      {p.label}
+                      {pick(p.label, lang)}
                     </option>
                   ))}
               </optgroup>
@@ -179,23 +191,23 @@ export default function App() {
           </select>
         </label>
         <label className="msg-field">
-          メッセージ / ペイロード（テンプレート）
+          {t("message", lang)}
           <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} />
         </label>
         <label>
-          送信元 IP（ホスト A）
+          {t("srcIp", lang)}
           <input value={srcIp} onChange={(e) => setSrcIp(e.target.value)} disabled={isSerial} />
         </label>
         <label>
-          宛先 IP（ホスト B）
+          {t("dstIp", lang)}
           <input value={dstIp} onChange={(e) => setDstIp(e.target.value)} disabled={isSerial} />
         </label>
         <button className="send-btn" onClick={handleSend} disabled={loading}>
-          {loading ? "処理中..." : "擬似送信 ▶ シミュレート"}
+          {loading ? t("sending", lang) : t("send", lang)}
         </button>
         {playing && (
           <button className="stop-btn" onClick={handleStop}>
-            ■ 停止
+            {t("stop", lang)}
           </button>
         )}
       </section>
@@ -204,65 +216,71 @@ export default function App() {
         <div className="proto-info">
           {isSerial ? (
             <>
-              <span className="proto-chip">L2: {selectedProtocol.l7Name} フレーム</span>
+              <span className="proto-chip">
+                L2: {selectedProtocol.l7Name}
+                {t("serialL2", lang)}
+              </span>
               <span className="proto-arrow">→</span>
-              <span className="proto-chip">L1: 信号線</span>
-              <span className="proto-chip warn">L3〜L7 は使わない（IP なし）</span>
+              <span className="proto-chip">{t("serialL1", lang)}</span>
+              <span className="proto-chip warn">{t("serialNoIp", lang)}</span>
             </>
           ) : (
             <>
               <span className="proto-chip">L7: {selectedProtocol.l7Name}</span>
               <span className="proto-arrow">→</span>
               <span className="proto-chip">
-                L4: {selectedProtocol.transport === "ICMP" ? "なし (ICMP)" : selectedProtocol.transport}
+                L4: {selectedProtocol.transport === "ICMP" ? t("l4None", lang) : selectedProtocol.transport}
                 {selectedProtocol.port > 0 && ` :${selectedProtocol.port}`}
               </span>
               <span className="proto-arrow">→</span>
               <span className="proto-chip">L3: {selectedProtocol.l3Protocol}</span>
-              {selectedProtocol.tls && <span className="proto-chip tls">L6: TLS 暗号化</span>}
+              {selectedProtocol.tls && <span className="proto-chip tls">{t("tlsChip", lang)}</span>}
             </>
           )}
-          <span className="proto-desc">{selectedProtocol.description}</span>
+          <span className="proto-desc">{pick(selectedProtocol.description, lang)}</span>
         </div>
       )}
 
       {error && (
         <div className="error">
-          エラー: {error}
+          {t("errorPrefix", lang)}
+          {error}
           <br />
-          バックエンド（http://localhost:8080）が起動しているか確認してください。
+          {t("errorHint", lang)}
         </div>
       )}
 
       <main className="main">
         <div className="stacks">
           {!started ? (
-            <p className="placeholder">レイヤースタックを読み込み中...</p>
+            <p className="placeholder">{t("loadingStacks", lang)}</p>
           ) : (
             <div className="two-hosts">
               <div className="host-col">
-                <div className="host-title send">送信ホスト A ▼ カプセル化</div>
+                <div className="host-title send">{t("hostASend", lang)}</div>
                 <LayerStack
                   steps={encapSteps}
                   mode="encap"
                   selectedLevel={selection?.host === "A" ? selection.level : null}
                   activeLevel={activeA}
+                  lang={lang}
                   onSelect={(level) => setSelection({ host: "A", level })}
                 />
               </div>
 
               <div className="wire" aria-hidden>
                 <div className="wire-line" />
-                <div className="wire-label">物理媒体（擬似）</div>
+                <div className="wire-label">{t("wire", lang)}</div>
               </div>
 
               <div className="host-col">
-                <div className="host-title recv">受信ホスト B ▲ デカプセル化</div>
+                <div className="host-title recv">{t("hostBRecv", lang)}</div>
                 <LayerStack
                   steps={decapSteps}
                   mode="decap"
                   selectedLevel={selection?.host === "B" ? selection.level : null}
                   activeLevel={activeB}
+                  lang={lang}
                   onSelect={(level) => setSelection({ host: "B", level })}
                 />
               </div>
@@ -273,10 +291,14 @@ export default function App() {
         <aside className="detail-col">
           {selection && (
             <div className="detail-host-tag">
-              {selection.host === "A" ? "送信ホスト A" : "受信ホスト B"}
+              {selection.host === "A" ? t("hostATag", lang) : t("hostBTag", lang)}
             </div>
           )}
-          <PacketDetail step={selectedStep} mode={selection?.host === "B" ? "decap" : "encap"} />
+          <PacketDetail
+            step={selectedStep}
+            mode={selection?.host === "B" ? "decap" : "encap"}
+            lang={lang}
+          />
         </aside>
       </main>
     </div>

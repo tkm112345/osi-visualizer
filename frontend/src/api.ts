@@ -1,6 +1,8 @@
 import type { EncapsulateRequest, Layer, Protocol, Step } from "./types";
 
-const BASE = "http://localhost:8080";
+// 相対パスで /api を叩く。開発時は Vite の proxy、本番(Docker)は nginx が
+// /api をバックエンドへ転送する。
+const BASE = "";
 
 export async function fetchLayers(): Promise<Layer[]> {
   const res = await fetch(`${BASE}/api/layers`);

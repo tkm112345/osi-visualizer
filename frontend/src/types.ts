@@ -1,5 +1,11 @@
 // バックエンドの JSON と対応する型定義。
 
+// Text はバックエンドが返す多言語文字列（日本語・英語の両方）。
+export interface Text {
+  ja: string;
+  en: string;
+}
+
 export interface Layer {
   level: number;
   name: string;
@@ -13,21 +19,21 @@ export interface Layer {
 export interface Protocol {
   key: string;
   l7Name: string;
-  label: string;
-  category: string;
+  label: Text;
+  category: Text;
   family: string;
   transport: string;
   port: number;
   tls: boolean;
   l3Protocol: string;
   samplePayload: string;
-  description: string;
+  description: Text;
 }
 
 // FramePart は、ある層での PDU を構成する 1 区画（ヘッダ / ペイロード / トレーラ）。
 export interface FramePart {
-  label: string;
-  detail: string;
+  label: Text;
+  detail: Text;
   kind: "header" | "payload" | "trailer";
   bytes: number;
 }
@@ -40,12 +46,12 @@ export interface Step {
   addsHeader: boolean;
   active: boolean;
   headers: Record<string, string>;
-  processing: string[];
+  processing: Text[];
   payload: string;
   headerBytes: number;
   totalBytes: number;
   structure: string;
-  note: string;
+  note: Text;
   bitstream: string;
   frame: FramePart[];
 }

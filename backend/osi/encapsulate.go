@@ -17,8 +17,8 @@ type Request struct {
 // FramePart は、ある層でのPDUを構成する 1 区画（ヘッダ / ペイロード / トレーラ）。
 // アコーディオンで「実際どんなデータになっているか」を見せるために使う。
 type FramePart struct {
-	Label  string `json:"label"`  // 例: "IP ヘッダ", "ペイロード (HTML)"
-	Detail string `json:"detail"` // 実際のフィールド値やペイロード内容
+	Label  Text   `json:"label"`  // 例: "IP ヘッダ", "ペイロード (HTML)"
+	Detail Text   `json:"detail"` // 実際のフィールド値やペイロード内容
 	Kind   string `json:"kind"`   // "header" | "payload" | "trailer"
 	Bytes  int    `json:"bytes"`
 }
@@ -32,30 +32,33 @@ type Step struct {
 	AddsHeader  bool              `json:"addsHeader"`
 	Active      bool              `json:"active"` // このシナリオでこの層が使われるか
 	Headers     map[string]string `json:"headers"`
-	Processing  []string          `json:"processing"`
+	Processing  []Text            `json:"processing"`
 	Payload     string            `json:"payload"`
 	HeaderBytes int               `json:"headerBytes"`
 	TotalBytes  int               `json:"totalBytes"`
 	Structure   string            `json:"structure"`
-	Note        string            `json:"note"`
+	Note        Text              `json:"note"`
 	Bitstream   string            `json:"bitstream"`
 	Frame       []FramePart       `json:"frame"` // この層でのPDU構造（実データ）
 }
 
-func payloadLabel(p Protocol) string {
+func payloadLabel(p Protocol) Text {
 	switch p.Key {
 	case "http", "https", "websocket":
-		return "ペイロード (本文)"
+		return tx("ペイロード (本文)", "Payload (body)")
 	case "ping":
-		return "ICMP データ"
+		return tx("ICMP データ (往復測定用パディング)", "ICMP data (round-trip padding)")
 	default:
-		return "ペイロード (" + p.L7Name + ")"
+		return tx("ペイロード ("+p.L7Name+")", "Payload ("+p.L7Name+")")
 	}
 }
 
 // tlsEncrypted は TLS 暗号化後の見かけ（教育用のダミー表現）を返す。
-func tlsEncrypted(msg string) string {
-	return fmt.Sprintf("🔒 Application Data (%dB, TLS暗号化されており中身は読めない)", len(msg))
+func tlsEncrypted(msg string) Text {
+	return tx(
+		fmt.Sprintf("🔒 Application Data (%dB, TLS暗号化されており中身は読めない)", len(msg)),
+		fmt.Sprintf("🔒 Application Data (%dB, TLS-encrypted; contents unreadable)", len(msg)),
+	)
 }
 
 func tcpDetail(p Protocol) string {
@@ -67,13 +70,24 @@ func udpDetail(p Protocol, dataLen int) string {
 func ipDetail(req Request, p Protocol) string {
 	return fmt.Sprintf("version=4  ihl=5  ttl=64  proto=%s  src=%s  dst=%s", p.L3Protocol, req.SrcIP, req.DstIP)
 }
-func icmpDetail() string { return "type=8 (Echo Request)  code=0  id=0x0001  seq=1" }
+func icmpDetail() string {
+	return "type=8 (Echo Request)  code=0  checksum=0x4d5a  id=0x0001  seq=1"
+}
 func ethDetail() string {
 	return "dst=11:22:33:44:55:66  src=AA:BB:CC:DD:EE:01  ethertype=0x0800"
 }
 
-func hdr(label, detail string, bytes int) FramePart {
+func hdr(label, detail Text, bytes int) FramePart {
 	return FramePart{Label: label, Detail: detail, Kind: "header", Bytes: bytes}
+}
+
+// ヘッダラベルの多言語ヘルパ。
+func ipHdrLabel() Text   { return tx("IP ヘッダ", "IP header") }
+func icmpHdrLabel() Text { return tx("ICMP ヘッダ", "ICMP header") }
+func ethHdrLabel() Text  { return tx("Ethernet ヘッダ", "Ethernet header") }
+func fcsLabel() Text     { return txSame("FCS (CRC32)") }
+func l4HdrLabel(p Protocol) Text {
+	return tx(p.Transport+" ヘッダ", p.Transport+" header")
 }
 
 // 各レイヤーが付与するヘッダのバイト数（教育用の代表値）。
@@ -96,7 +110,7 @@ func normalize(req Request) Request {
 	return req
 }
 
-// l7Headers は選択プロトコルに応じた L7 ヘッダ表示を返す。
+// l7Headers は選択プロトコルに応じた L7 ヘッダ表示を返す（技術的な値なので言語共通）。
 func l7Headers(p Protocol, dstIP string) map[string]string {
 	port := strconv.Itoa(p.Port)
 	switch p.Key {
@@ -130,55 +144,75 @@ func serialFramingBytes(p Protocol) int {
 	return 0 // UART/SPI はビット単位の枠付けで、明確なヘッダバイトは持たない
 }
 
-// serialL2Headers / serialL1Headers はシリアル通信の L2/L1 表示を返す。
-func serialL2Headers(p Protocol) (map[string]string, string) {
+// serialL2Headers はシリアル通信の L2 ヘッダ表示（技術値）と処理ノートを返す。
+func serialL2Headers(p Protocol) (map[string]string, Text) {
 	switch p.Key {
 	case "uart":
 		return map[string]string{
 			"frame":  "Start(1) + Data(8) + Parity + Stop(1)",
 			"parity": "None",
 			"flow":   "None",
-		}, "1 バイトごとに Start/Stop ビットで枠付け（フレーミング）する。"
+		}, tx("1 バイトごとに Start/Stop ビットで枠付け（フレーミング）する。",
+			"Frames each byte with start/stop bits.")
 	case "i2c":
 		return map[string]string{
 			"address": "0x3C (7bit)",
 			"rw":      "Write(0)",
 			"ack":     "ACK/NACK",
-		}, "先頭でスレーブアドレスと R/W を送り、各バイトで ACK を確認する。"
+		}, tx("先頭でスレーブアドレスと R/W を送り、各バイトで ACK を確認する。",
+			"Sends the slave address and R/W first, then checks ACK per byte.")
 	case "spi":
 		return map[string]string{
 			"chipSelect": "CS0 (Low)",
 			"mode":       "Mode 0 (CPOL=0, CPHA=0)",
-		}, "CS 線で通信相手のチップを選択する。アドレスの概念は無い。"
+		}, tx("CS 線で通信相手のチップを選択する。アドレスの概念は無い。",
+			"Selects the target chip with the CS line; there is no address concept.")
 	default:
-		return map[string]string{}, ""
+		return map[string]string{}, Text{}
 	}
 }
 
-func serialL1Info(p Protocol) ([]string, string) {
+func serialL1Info(p Protocol) ([]Text, Text) {
 	switch p.Key {
 	case "uart":
-		return []string{"信号線: TX / RX", "ボーレート: 9600 bps", "電圧レベル: 3.3V"}, "TX/RX の 2 線で、クロックを共有せず非同期にビットを送る。"
+		return []Text{
+				tx("信号線: TX / RX", "Lines: TX / RX"),
+				tx("ボーレート: 9600 bps", "Baud rate: 9600 bps"),
+				tx("電圧レベル: 3.3V", "Voltage level: 3.3V"),
+			}, tx("TX/RX の 2 線で、クロックを共有せず非同期にビットを送る。",
+				"Two lines (TX/RX) send bits asynchronously without a shared clock.")
 	case "i2c":
-		return []string{"信号線: SDA / SCL", "配線: オープンドレイン + プルアップ", "クロック: 400 kHz"}, "SDA(データ)/SCL(クロック)の 2 線で通信する。"
+		return []Text{
+				tx("信号線: SDA / SCL", "Lines: SDA / SCL"),
+				tx("配線: オープンドレイン + プルアップ", "Wiring: open-drain + pull-up"),
+				tx("クロック: 400 kHz", "Clock: 400 kHz"),
+			}, tx("SDA(データ)/SCL(クロック)の 2 線で通信する。",
+				"Communicates over two lines: SDA (data) and SCL (clock).")
 	case "spi":
-		return []string{"信号線: MOSI / MISO / SCLK / CS", "クロック: SCLK を共有"}, "複数線でクロックを共有し全二重で送受信する。"
+		return []Text{
+				tx("信号線: MOSI / MISO / SCLK / CS", "Lines: MOSI / MISO / SCLK / CS"),
+				tx("クロック: SCLK を共有", "Clock: shared SCLK"),
+			}, tx("複数線でクロックを共有し全二重で送受信する。",
+				"Multiple lines share a clock for full-duplex transfer.")
 	default:
-		return nil, ""
+		return nil, Text{}
 	}
 }
 
 // serialL2Detail は L2 フレーミングの実データ表現を返す。
-func serialL2Detail(p Protocol) string {
+func serialL2Detail(p Protocol) Text {
 	switch p.Key {
 	case "uart":
-		return "各バイトを Start(1) + Data(8) + Stop(1) ビットで枠付け, Parity=None"
+		return tx("各バイトを Start(1) + Data(8) + Stop(1) ビットで枠付け, Parity=None",
+			"Each byte framed as Start(1) + Data(8) + Stop(1) bits, Parity=None")
 	case "i2c":
-		return "Start + Address(0x76,7bit) + R/W(0) + ACK ... 各バイト後に ACK"
+		return tx("Start + Address(0x76,7bit) + R/W(0) + ACK ... 各バイト後に ACK",
+			"Start + Address(0x76,7bit) + R/W(0) + ACK ... ACK after each byte")
 	case "spi":
-		return "CS=Low で選択, SCLK に同期して MOSI/MISO を全二重送受信"
+		return tx("CS=Low で選択, SCLK に同期して MOSI/MISO を全二重送受信",
+			"Select with CS=Low, exchange MOSI/MISO full-duplex synced to SCLK")
 	default:
-		return ""
+		return Text{}
 	}
 }
 
@@ -189,7 +223,7 @@ func encapsulateSerial(req Request, p Protocol) []Step {
 	structure := "[Data]"
 	steps := make([]Step, 0, len(Layers))
 
-	pl := FramePart{Label: payloadLabel(p), Detail: req.Message, Kind: "payload", Bytes: len(req.Message)}
+	pl := FramePart{Label: payloadLabel(p), Detail: txSame(req.Message), Kind: "payload", Bytes: len(req.Message)}
 	var hdrs []FramePart
 
 	for _, l := range Layers {
@@ -201,7 +235,9 @@ func encapsulateSerial(req Request, p Protocol) []Step {
 		switch l.Level {
 		case 7, 6, 5, 4, 3:
 			step.Active = false
-			step.Note = p.L7Name + " は IP ネットワークを使わない。L3〜L7 は無く、L1/L2 だけで通信する。"
+			step.Note = tx(
+				p.L7Name+" は IP ネットワークを使わない。L3〜L7 は無く、L1/L2 だけで通信する。",
+				p.L7Name+" does not use an IP network. There is no L3–L7; it communicates using only L1/L2.")
 		case 2:
 			headers, note := serialL2Headers(p)
 			step.Headers = headers
@@ -209,7 +245,8 @@ func encapsulateSerial(req Request, p Protocol) []Step {
 			total += framing
 			structure = "[" + p.L7Name + " " + structure + "]"
 			step.Note = note
-			hdrs = append([]FramePart{hdr(p.L7Name+" フレーミング", serialL2Detail(p), framing)}, hdrs...)
+			hdrs = append([]FramePart{hdr(
+				tx(p.L7Name+" フレーミング", p.L7Name+" framing"), serialL2Detail(p), framing)}, hdrs...)
 		case 1:
 			proc, note := serialL1Info(p)
 			step.Processing = proc
@@ -241,7 +278,7 @@ func Encapsulate(req Request) []Step {
 	steps := make([]Step, 0, len(Layers))
 
 	// frame は「その層での実データ構造」を組み立てるための状態。
-	pl := FramePart{Label: payloadLabel(p), Detail: req.Message, Kind: "payload", Bytes: len(req.Message)}
+	pl := FramePart{Label: payloadLabel(p), Detail: txSame(req.Message), Kind: "payload", Bytes: len(req.Message)}
 	var hdrs []FramePart
 	var trailer *FramePart
 	buildFrame := func() []FramePart {
@@ -269,53 +306,68 @@ func Encapsulate(req Request) []Step {
 		case 7:
 			if isPing {
 				step.Active = false
-				step.Note = "Ping(ICMP) はアプリケーション層プロトコルを使わない。"
+				step.Note = tx("Ping(ICMP) はアプリケーション層プロトコルを使わない。",
+					"Ping (ICMP) does not use an application-layer protocol.")
 			} else {
 				step.Headers = l7Headers(p, req.DstIP)
-				step.Note = "アプリ（" + p.L7Name + "）が生成したデータ本体。これが最内のペイロードになる。"
+				step.Note = tx(
+					"アプリ（"+p.L7Name+"）が生成したデータ本体。これが最内のペイロードになる。",
+					"The data generated by the app ("+p.L7Name+"). This becomes the innermost payload.")
 			}
 
 		case 6:
 			if isPing {
 				step.Active = false
-				step.Note = "Ping では使用しない。"
+				step.Note = tx("Ping では使用しない。", "Not used for Ping.")
 			} else {
-				step.Processing = []string{"文字コード変換 (UTF-8)"}
+				step.Processing = []Text{tx("文字コード変換 (UTF-8)", "Character encoding (UTF-8)")}
 				if p.TLS {
-					step.Processing = append([]string{"TLS による暗号化"}, step.Processing...)
-					step.Note = p.L7Name + " なので、この層で TLS 暗号化が行われる。以降ペイロードは暗号文になる。"
+					step.Processing = append([]Text{tx("TLS による暗号化", "TLS encryption")}, step.Processing...)
+					step.Note = tx(
+						p.L7Name+" なので、この層で TLS 暗号化が行われる。以降ペイロードは暗号文になる。",
+						p.L7Name+" uses TLS, so encryption happens here. The payload is ciphertext from now on.")
 					pl.Detail = tlsEncrypted(req.Message)
-					pl.Label = "ペイロード (TLS暗号化)"
+					pl.Label = tx("ペイロード (TLS暗号化)", "Payload (TLS-encrypted)")
 				} else {
-					step.Note = "独立したヘッダは付与しない。TCP/IP モデルでは Application 層に含まれる。"
+					step.Note = tx(
+						"独立したヘッダは付与しない。TCP/IP モデルでは Application 層に含まれる。",
+						"No separate header is added. In the TCP/IP model this is part of the Application layer.")
 				}
 			}
 
 		case 5:
 			if isPing {
 				step.Active = false
-				step.Note = "Ping では使用しない。"
+				step.Note = tx("Ping では使用しない。", "Not used for Ping.")
 			} else {
-				step.Processing = []string{"セッション確立/維持", "同期ポイントの管理"}
-				step.Note = "独立したヘッダは付与しない。TCP/IP モデルでは Application 層に含まれる。"
+				step.Processing = []Text{
+					tx("セッション確立/維持", "Establish/maintain session"),
+					tx("同期ポイントの管理", "Manage sync points"),
+				}
+				step.Note = tx(
+					"独立したヘッダは付与しない。TCP/IP モデルでは Application 層に含まれる。",
+					"No separate header is added. In the TCP/IP model this is part of the Application layer.")
 			}
 
 		case 4:
 			if isPing {
 				step.Active = false
-				step.Note = "ICMP は L4(TCP/UDP) を使わず、IP の直上で動作する。"
+				step.Note = tx("ICMP は L4(TCP/UDP) を使わず、IP の直上で動作する。",
+					"ICMP does not use L4 (TCP/UDP); it runs directly on top of IP.")
 			} else {
 				headers, hb := transportHeaders(p)
 				step.Headers = headers
 				step.HeaderBytes = hb
 				total += hb
 				structure = "[" + p.Transport + " " + structure + "]"
-				step.Note = fmt.Sprintf("ポート %d でアプリを識別。%s ヘッダ(%dB)を付与する。", p.Port, p.Transport, hb)
+				step.Note = tx(
+					fmt.Sprintf("ポート %d でアプリを識別。%s ヘッダ(%dB)を付与する。", p.Port, p.Transport, hb),
+					fmt.Sprintf("Identifies the app by port %d. Adds a %s header (%dB).", p.Port, p.Transport, hb))
 				detail := tcpDetail(p)
 				if p.Transport == "UDP" {
 					detail = udpDetail(p, len(req.Message))
 				}
-				hdrs = append([]FramePart{hdr(p.Transport+" ヘッダ", detail, hb)}, hdrs...)
+				hdrs = append([]FramePart{hdr(l4HdrLabel(p), txSame(detail), hb)}, hdrs...)
 			}
 
 		case 3:
@@ -332,15 +384,19 @@ func Encapsulate(req Request) []Step {
 				step.Headers["icmpType"] = "8 (Echo Request)"
 				step.Headers["icmpCode"] = "0"
 				step.HeaderBytes = icmpHeaderBytes + ipHeaderBytes
-				step.Note = "ICMP Echo Request を作り、IP ヘッダを付与する。TCP/UDP は挟まらない。"
-				hdrs = append([]FramePart{hdr("ICMP ヘッダ", icmpDetail(), icmpHeaderBytes)}, hdrs...)
+				step.Note = tx(
+					"ICMP Echo Request を作り、IP ヘッダを付与する。TCP/UDP は挟まらない。",
+					"Builds an ICMP Echo Request and adds an IP header. No TCP/UDP in between.")
+				hdrs = append([]FramePart{hdr(icmpHdrLabel(), txSame(icmpDetail()), icmpHeaderBytes)}, hdrs...)
 			} else {
 				step.HeaderBytes = ipHeaderBytes
-				step.Note = "IP アドレスを付与し、ネットワーク間の経路制御を可能にする。"
+				step.Note = tx(
+					"IP アドレスを付与し、ネットワーク間の経路制御を可能にする。",
+					"Adds IP addresses to enable routing between networks.")
 			}
 			total += ipHeaderBytes
 			structure = "[IP " + structure + "]"
-			hdrs = append([]FramePart{hdr("IP ヘッダ", ipDetail(req, p), ipHeaderBytes)}, hdrs...)
+			hdrs = append([]FramePart{hdr(ipHdrLabel(), txSame(ipDetail(req, p)), ipHeaderBytes)}, hdrs...)
 
 		case 2:
 			step.Headers = map[string]string{
@@ -352,13 +408,18 @@ func Encapsulate(req Request) []Step {
 			step.HeaderBytes = ethHeaderBytes + ethTrailer
 			total += ethHeaderBytes + ethTrailer
 			structure = "[Eth " + structure + " FCS]"
-			step.Note = "MAC アドレスを付与してフレーム化。末尾に FCS（誤り検出）も付く。"
-			hdrs = append([]FramePart{hdr("Ethernet ヘッダ", ethDetail(), ethHeaderBytes)}, hdrs...)
-			trailer = &FramePart{Label: "FCS (CRC32)", Detail: "0x1A2B3C4D", Kind: "trailer", Bytes: ethTrailer}
+			step.Note = tx(
+				"MAC アドレスを付与してフレーム化。末尾に FCS（誤り検出）も付く。",
+				"Adds MAC addresses to build a frame. An FCS (error check) is appended at the end.")
+			hdrs = append([]FramePart{hdr(ethHdrLabel(), txSame(ethDetail()), ethHeaderBytes)}, hdrs...)
+			trailer = &FramePart{Label: fcsLabel(), Detail: txSame("0x1A2B3C4D"), Kind: "trailer", Bytes: ethTrailer}
 
 		case 1:
-			step.Processing = []string{"ビット列を電気/光/電波の信号に変換"}
-			step.Note = "フレームをビット列として物理媒体に送出する。"
+			step.Processing = []Text{tx("ビット列を電気/光/電波の信号に変換",
+				"Convert bits to electrical/optical/radio signals")}
+			step.Note = tx(
+				"フレームをビット列として物理媒体に送出する。",
+				"Sends the frame onto the physical medium as a bit stream.")
 			step.Bitstream = toBits(req.Message, 4)
 		}
 

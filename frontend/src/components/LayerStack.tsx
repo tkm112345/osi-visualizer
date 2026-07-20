@@ -1,4 +1,5 @@
 import type { Step } from "../types";
+import type { Lang } from "../i18n";
 import LayerCard from "./LayerCard";
 
 interface Props {
@@ -6,13 +7,14 @@ interface Props {
   mode: "encap" | "decap";
   selectedLevel: number | null;
   activeLevel: number | null;
+  lang: Lang;
   onSelect: (level: number) => void;
 }
 
 // 常に L7（上）〜 L1（下）で表示する。
 // encap: データは上→下へ進むので activeLevel 以上（level が大きい方）が到達済み。
 // decap: データは下→上へ進むので activeLevel 以下（level が小さい方）が到達済み。
-export default function LayerStack({ steps, mode, selectedLevel, activeLevel, onSelect }: Props) {
+export default function LayerStack({ steps, mode, selectedLevel, activeLevel, lang, onSelect }: Props) {
   const display = [...steps].sort((a, b) => b.level - a.level); // L7 → L1
 
   function isReached(level: number): boolean {
@@ -29,6 +31,7 @@ export default function LayerStack({ steps, mode, selectedLevel, activeLevel, on
           selected={selectedLevel === step.level}
           active={activeLevel === step.level}
           reached={isReached(step.level)}
+          lang={lang}
           onClick={() => onSelect(step.level)}
         />
       ))}
