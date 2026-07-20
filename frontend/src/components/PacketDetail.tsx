@@ -14,6 +14,19 @@ export default function PacketDetail({ step, mode }: Props) {
     );
   }
 
+  if (step.active === false) {
+    return (
+      <div className="detail">
+        <h2>
+          L{step.level} {step.name}
+          <span className="detail-ja">{step.nameJa}</span>
+        </h2>
+        <p className="detail-note">{step.note}</p>
+        <p className="muted">この通信シナリオでは、この層は使用されません。</p>
+      </div>
+    );
+  }
+
   const headerLabel =
     mode === "encap" ? "このレイヤーで付与するヘッダ" : "このレイヤーで解析・除去するヘッダ";
 

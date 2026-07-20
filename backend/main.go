@@ -31,6 +31,10 @@ func handleLayers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, osi.Layers)
 }
 
+func handleProtocols(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, osi.Protocols)
+}
+
 // decodeRequest は POST ボディを osi.Request にデコードする共通処理。
 // 2 つ目の戻り値が false のときは既にエラーレスポンスを書き終えている。
 func decodeRequest(w http.ResponseWriter, r *http.Request) (osi.Request, bool) {
@@ -67,6 +71,7 @@ func handleDecapsulate(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/api/layers", withCORS(handleLayers))
+	http.HandleFunc("/api/protocols", withCORS(handleProtocols))
 	http.HandleFunc("/api/encapsulate", withCORS(handleEncapsulate))
 	http.HandleFunc("/api/decapsulate", withCORS(handleDecapsulate))
 

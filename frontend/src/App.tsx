@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { decapsulate, encapsulate } from "./api";
-import type { Step } from "./types";
+import { decapsulate, encapsulate, fetchProtocols } from "./api";
+import type { Protocol, Step } from "./types";
 import LayerStack from "./components/LayerStack";
 import PacketDetail from "./components/PacketDetail";
 
@@ -17,6 +17,9 @@ export default function App() {
   const [srcIp, setSrcIp] = useState("192.168.0.10");
   const [dstIp, setDstIp] = useState("93.184.216.34");
 
+  const [protocols, setProtocols] = useState<Protocol[]>([]);
+  const [protocol, setProtocol] = useState("http");
+
   const [encapSteps, setEncapSteps] = useState<Step[]>([]);
   const [decapSteps, setDecapSteps] = useState<Step[]>([]);
   const [activeA, setActiveA] = useState<number | null>(null);
@@ -32,6 +35,12 @@ export default function App() {
   }
   useEffect(() => clearTimers, []);
 
+  useEffect(() => {
+    fetchProtocols()
+      .then(setProtocols)
+      .catch(() => setProtocols([]));
+  }, []);
+
   async function handleSend() {
     setError(null);
     setLoading(true);
@@ -40,7 +49,7 @@ export default function App() {
     setActiveA(null);
     setActiveB(null);
     try {
-      const req = { message, srcIp, dstIp };
+      const req = { message, srcIp, dstIp, protocol };
       const [enc, dec] = await Promise.all([encapsulate(req), decapsulate(req)]);
       setEncapSteps(enc);
       setDecapSteps(dec);
@@ -76,6 +85,7 @@ export default function App() {
     }
   }
 
+  const selectedProtocol = protocols.find((p) => p.key === protocol) ?? null;
   const started = encapSteps.length > 0;
   const activeSteps = selection?.host === "B" ? decapSteps : encapSteps;
   const selectedStep = selection
@@ -98,6 +108,16 @@ export default function App() {
 
       <section className="controls">
         <label>
+          プロトコル
+          <select value={protocol} onChange={(e) => setProtocol(e.target.value)}>
+            {protocols.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           メッセージ
           <input value={message} onChange={(e) => setMessage(e.target.value)} />
         </label>
@@ -113,6 +133,21 @@ export default function App() {
           {loading ? "処理中..." : "擬似送信 ▶ シミュレート"}
         </button>
       </section>
+
+      {selectedProtocol && (
+        <div className="proto-info">
+          <span className="proto-chip">L7: {selectedProtocol.l7Name}</span>
+          <span className="proto-arrow">→</span>
+          <span className="proto-chip">
+            L4: {selectedProtocol.transport === "ICMP" ? "なし (ICMP)" : selectedProtocol.transport}
+            {selectedProtocol.port > 0 && ` :${selectedProtocol.port}`}
+          </span>
+          <span className="proto-arrow">→</span>
+          <span className="proto-chip">L3: {selectedProtocol.l3Protocol}</span>
+          {selectedProtocol.tls && <span className="proto-chip tls">L6: TLS 暗号化</span>}
+          <span className="proto-desc">{selectedProtocol.description}</span>
+        </div>
+      )}
 
       {error && (
         <div className="error">

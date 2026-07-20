@@ -55,7 +55,8 @@ body {
   gap: 4px;
 }
 
-.controls input {
+.controls input,
+.controls select {
   background: var(--bg);
   border: 1px solid var(--panel-2);
   color: var(--text);
@@ -63,6 +64,51 @@ body {
   border-radius: 6px;
   font-size: 14px;
   min-width: 160px;
+}
+
+/* Protocol info banner */
+.proto-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.proto-chip {
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.proto-chip.tls {
+  background: #4c1d95;
+  color: #ddd6fe;
+}
+
+.proto-arrow {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.proto-desc {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.proto-tag {
+  background: var(--accent);
+  color: #04263a;
+  font-weight: 700;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
 }
 
 .send-btn {
@@ -253,6 +299,11 @@ body {
 .layer-card.no-header {
   border-style: dashed;
   border-left-style: solid;
+}
+
+.layer-card.inactive {
+  opacity: 0.4;
+  filter: grayscale(0.7);
 }
 
 .layer-badge {

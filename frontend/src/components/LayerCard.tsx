@@ -21,11 +21,13 @@ const LEVEL_COLORS: Record<number, string> = {
 
 export default function LayerCard({ step, selected, active, reached, onClick }: Props) {
   const color = LEVEL_COLORS[step.level] ?? "#888";
+  const inactive = step.active === false;
   const classes = ["layer-card"];
   if (selected) classes.push("selected");
   if (active) classes.push("active");
   if (!reached) classes.push("dim");
   if (!step.addsHeader) classes.push("no-header");
+  if (inactive) classes.push("inactive");
 
   return (
     <button
@@ -41,11 +43,20 @@ export default function LayerCard({ step, selected, active, reached, onClick }: 
           {step.name} <span className="layer-ja">{step.nameJa}</span>
         </div>
         <div className="layer-meta">
-          <span className="pdu">PDU: {step.pdu}</span>
-          {step.addsHeader ? (
-            <span className="bytes">累積 {step.totalBytes} B</span>
+          {inactive ? (
+            <span className="bytes muted">このシナリオでは使用しない</span>
           ) : (
-            <span className="bytes muted">ヘッダなし</span>
+            <>
+              <span className="pdu">PDU: {step.pdu}</span>
+              {step.headers.protocol && (
+                <span className="proto-tag">{step.headers.protocol}</span>
+              )}
+              {step.addsHeader ? (
+                <span className="bytes">累積 {step.totalBytes} B</span>
+              ) : (
+                <span className="bytes muted">ヘッダなし</span>
+              )}
+            </>
           )}
         </div>
       </div>

@@ -1,10 +1,16 @@
-import type { EncapsulateRequest, Layer, Step } from "./types";
+import type { EncapsulateRequest, Layer, Protocol, Step } from "./types";
 
 const BASE = "http://localhost:8080";
 
 export async function fetchLayers(): Promise<Layer[]> {
   const res = await fetch(`${BASE}/api/layers`);
   if (!res.ok) throw new Error(`GET /api/layers failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchProtocols(): Promise<Protocol[]> {
+  const res = await fetch(`${BASE}/api/protocols`);
+  if (!res.ok) throw new Error(`GET /api/protocols failed: ${res.status}`);
   return res.json();
 }
 

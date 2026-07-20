@@ -1,23 +1,40 @@
 package osi
 
+import (
+	"fmt"
+	"strconv"
+)
+
 // Decapsulate は受信ホスト視点で、届いたフレームを L1 → L7 へ
 // デカプセル化（ヘッダを解析して外していく）各ステップを返す。
-// これは Encapsulate と対称で、あくまで擬似的なシミュレーション。
+// 選択プロトコルにより L4(TCP/UDP) の有無や ICMP かどうかが変わる。あくまで擬似。
 func Decapsulate(req Request) []Step {
-	if req.SrcIP == "" {
-		req.SrcIP = "192.168.0.10"
-	}
-	if req.DstIP == "" {
-		req.DstIP = "93.184.216.34"
-	}
+	req = normalize(req)
+	p := ProtocolByKey(req.Protocol)
+	isPing := p.Transport == "ICMP"
 
-	payloadBytes := len(req.Message)
-	// 受信時は「フル装備のフレーム」が届いた状態から始まる。
-	full := payloadBytes + tcpHeaderBytes + ipHeaderBytes + ethHeaderBytes + ethTrailer
+	// 送信側で積み上がった最終サイズから逆算して「フル装備」の初期値を求める。
+	transportBytes := tcpHeaderBytes
+	if p.Transport == "UDP" {
+		transportBytes = udpHeaderBytes
+	}
+	l3Extra := 0 // ping の場合の ICMP ヘッダ
+	if isPing {
+		transportBytes = 0
+		l3Extra = icmpHeaderBytes
+	}
+	full := len(req.Message) + transportBytes + l3Extra + ipHeaderBytes + ethHeaderBytes + ethTrailer
 	remaining := full
 	structure := "[Eth [IP [TCP [Data]]] FCS]"
+	if p.Transport == "UDP" {
+		structure = "[Eth [IP [UDP [Data]]] FCS]"
+	}
+	if isPing {
+		structure = "[Eth [IP [ICMP [Data]]] FCS]"
+	}
 
 	steps := make([]Step, 0, len(Layers))
+	port := strconv.Itoa(p.Port)
 
 	// Layers は L7→L1 順なので、受信側は逆順（L1→L7）に走査する。
 	for i := len(Layers) - 1; i >= 0; i-- {
@@ -28,6 +45,7 @@ func Decapsulate(req Request) []Step {
 			NameJa:     l.NameJa,
 			PDU:        l.PDU,
 			AddsHeader: l.AddsHeader,
+			Active:     true,
 			Payload:    req.Message,
 			Headers:    map[string]string{},
 		}
@@ -47,7 +65,11 @@ func Decapsulate(req Request) []Step {
 			}
 			step.HeaderBytes = ethHeaderBytes + ethTrailer
 			remaining -= ethHeaderBytes + ethTrailer
-			structure = "[IP [TCP [Data]]]"
+			if isPing {
+				structure = "[IP [ICMP [Data]]]"
+			} else {
+				structure = fmt.Sprintf("[IP [%s [Data]]]", p.Transport)
+			}
 			step.Note = "宛先 MAC が自分宛かを確認し、FCS で誤りがないか検査。Ethernet ヘッダを外す。"
 
 		case 3:
@@ -55,40 +77,70 @@ func Decapsulate(req Request) []Step {
 				"dstIp":    req.DstIP,
 				"srcIp":    req.SrcIP,
 				"ttl":      "63",
-				"protocol": "TCP(6)",
+				"protocol": p.L3Protocol,
 			}
-			step.HeaderBytes = ipHeaderBytes
-			remaining -= ipHeaderBytes
-			structure = "[TCP [Data]]"
-			step.Note = "宛先 IP が自分宛かを確認し、上位プロトコルが TCP であることを判別。IP ヘッダを外す。"
+			if isPing {
+				remaining -= ipHeaderBytes + icmpHeaderBytes
+				step.HeaderBytes = ipHeaderBytes + icmpHeaderBytes
+				step.Headers["icmpType"] = "8 (Echo Request)"
+				structure = "[Data]"
+				step.Note = "宛先 IP を確認。ICMP Echo Request と判別し、Echo Reply を返す（擬似）。L4 は無い。"
+			} else {
+				remaining -= ipHeaderBytes
+				step.HeaderBytes = ipHeaderBytes
+				structure = fmt.Sprintf("[%s [Data]]", p.Transport)
+				step.Note = "宛先 IP が自分宛かを確認し、上位プロトコルを判別。IP ヘッダを外す。"
+			}
 
 		case 4:
-			step.Headers = map[string]string{
-				"dstPort": "80",
-				"srcPort": "49152",
-				"seq":     "1",
-				"flags":   "PSH,ACK",
+			if isPing {
+				step.Active = false
+				step.Note = "ICMP は L4 を使わないため、この層の処理は無い。"
+			} else {
+				hb := tcpHeaderBytes
+				order := "順序を確認して"
+				if p.Transport == "UDP" {
+					hb = udpHeaderBytes
+					order = "（UDP は順序保証なし）"
+					step.Headers = map[string]string{"dstPort": port, "srcPort": "49152", "length": "8+data"}
+				} else {
+					step.Headers = map[string]string{"dstPort": port, "srcPort": "49152", "seq": "1", "flags": "PSH,ACK"}
+				}
+				step.HeaderBytes = hb
+				remaining -= hb
+				structure = "[Data]"
+				step.Note = fmt.Sprintf("宛先ポート %d から対応アプリへ振り分け（逆多重化）。%s%s ヘッダを外す。", p.Port, order, p.Transport)
 			}
-			step.HeaderBytes = tcpHeaderBytes
-			remaining -= tcpHeaderBytes
-			structure = "[Data]"
-			step.Note = "宛先ポート番号から対応するアプリへ振り分け（逆多重化）。順序を確認して TCP ヘッダを外す。"
 
 		case 5:
-			step.Processing = []string{"対応するセッションへ紐付け"}
-			step.Note = "独立したヘッダは無い。TCP/IP モデルでは Application 層に含まれる。"
+			if isPing {
+				step.Active = false
+				step.Note = "Ping では使用しない。"
+			} else {
+				step.Processing = []string{"対応するセッションへ紐付け"}
+				step.Note = "独立したヘッダは無い。"
+			}
 
 		case 6:
-			step.Processing = []string{"TLS 復号", "文字コード復元 (UTF-8)"}
-			step.Note = "独立したヘッダは無い。送信側で行った変換を元に戻す。"
+			if isPing {
+				step.Active = false
+				step.Note = "Ping では使用しない。"
+			} else {
+				step.Processing = []string{"文字コード復元 (UTF-8)"}
+				if p.TLS {
+					step.Processing = append([]string{"TLS 復号"}, step.Processing...)
+				}
+				step.Note = "送信側で行った変換を元に戻す。"
+			}
 
 		case 7:
-			step.Headers = map[string]string{
-				"protocol": "HTTP",
-				"method":   "GET",
-				"host":     req.DstIP,
+			if isPing {
+				step.Active = false
+				step.Note = "Ping はアプリケーション層プロトコルを使わない。"
+			} else {
+				step.Headers = l7Headers(p, req.DstIP)
+				step.Note = "アプリケーション（" + p.L7Name + "）が最終的にデータ本体を受信・解釈する。"
 			}
-			step.Note = "アプリケーションが最終的にデータ本体を受信・解釈する。"
 		}
 
 		step.TotalBytes = remaining
