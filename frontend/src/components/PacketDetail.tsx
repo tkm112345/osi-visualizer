@@ -1,15 +1,17 @@
 import type { Step } from "../types";
+import { pick, t, type Lang } from "../i18n";
 
 interface Props {
   step: Step | null;
   mode: "encap" | "decap";
+  lang: Lang;
 }
 
-export default function PacketDetail({ step, mode }: Props) {
+export default function PacketDetail({ step, mode, lang }: Props) {
   if (!step) {
     return (
       <div className="detail empty">
-        <p>レイヤーをクリックすると、そのレイヤーで何が起きているかが表示されます。</p>
+        <p>{t("clickHint", lang)}</p>
       </div>
     );
   }
@@ -21,14 +23,13 @@ export default function PacketDetail({ step, mode }: Props) {
           L{step.level} {step.name}
           <span className="detail-ja">{step.nameJa}</span>
         </h2>
-        <p className="detail-note">{step.note}</p>
-        <p className="muted">この通信シナリオでは、この層は使用されません。</p>
+        <p className="detail-note">{pick(step.note, lang)}</p>
+        <p className="muted">{t("layerUnusedNote", lang)}</p>
       </div>
     );
   }
 
-  const headerLabel =
-    mode === "encap" ? "このレイヤーで付与するヘッダ" : "このレイヤーで解析・除去するヘッダ";
+  const headerLabel = mode === "encap" ? t("headerAdd", lang) : t("headerRemove", lang);
 
   const headerEntries = Object.entries(step.headers);
 
@@ -44,7 +45,7 @@ export default function PacketDetail({ step, mode }: Props) {
         <span>{step.pdu}</span>
       </div>
 
-      <p className="detail-note">{step.note}</p>
+      <p className="detail-note">{pick(step.note, lang)}</p>
 
       {step.addsHeader ? (
         <section>
@@ -61,18 +62,21 @@ export default function PacketDetail({ step, mode }: Props) {
               </tbody>
             </table>
           ) : (
-            <p className="muted">（データ本体。まだヘッダは付いていません）</p>
+            <p className="muted">{t("dataBodyNoHeader", lang)}</p>
           )}
           {step.headerBytes > 0 && (
-            <p className="muted">ヘッダサイズ: {step.headerBytes} B</p>
+            <p className="muted">
+              {t("headerSize", lang)}
+              {step.headerBytes} B
+            </p>
           )}
         </section>
       ) : (
         <section>
-          <h3>このレイヤーの処理（ヘッダは付与しない）</h3>
+          <h3>{t("processingNoHeader", lang)}</h3>
           <ul className="processing-list">
-            {step.processing.map((p) => (
-              <li key={p}>{p}</li>
+            {step.processing.map((p, i) => (
+              <li key={i}>{pick(p, lang)}</li>
             ))}
           </ul>
         </section>
@@ -80,15 +84,18 @@ export default function PacketDetail({ step, mode }: Props) {
 
       {step.bitstream && (
         <section>
-          <h3>ビット列（先頭）</h3>
+          <h3>{t("bitstream", lang)}</h3>
           <code className="bitstream">{step.bitstream}</code>
         </section>
       )}
 
       <section>
-        <h3>カプセル化構造</h3>
+        <h3>{t("encStructure", lang)}</h3>
         <code className="structure">{step.structure}</code>
-        <p className="muted">累積サイズ: {step.totalBytes} B</p>
+        <p className="muted">
+          {t("cumulativeSize", lang)}
+          {step.totalBytes} B
+        </p>
       </section>
     </div>
   );

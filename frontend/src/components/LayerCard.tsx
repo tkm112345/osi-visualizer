@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Step } from "../types";
+import { t, type Lang } from "../i18n";
 import FrameView from "./FrameView";
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
   selected: boolean;
   active: boolean; // アニメーション中に現在処理しているレイヤー
   reached: boolean; // アニメーションで既に到達済みか
+  lang: Lang;
   onClick: () => void;
 }
 
@@ -21,7 +23,7 @@ const LEVEL_COLORS: Record<number, string> = {
   1: "#6b7280",
 };
 
-export default function LayerCard({ step, selected, active, reached, onClick }: Props) {
+export default function LayerCard({ step, selected, active, reached, lang, onClick }: Props) {
   const [open, setOpen] = useState(false);
   const color = LEVEL_COLORS[step.level] ?? "#888";
   const inactive = step.active === false;
@@ -57,7 +59,7 @@ export default function LayerCard({ step, selected, active, reached, onClick }: 
         </div>
         <div className="layer-meta">
           {inactive ? (
-            <span className="bytes muted">このシナリオでは使用しない</span>
+            <span className="bytes muted">{t("notUsed", lang)}</span>
           ) : (
             <>
               <span className="pdu">PDU: {step.pdu}</span>
@@ -65,9 +67,11 @@ export default function LayerCard({ step, selected, active, reached, onClick }: 
                 <span className="proto-tag">{step.headers.protocol}</span>
               )}
               {step.addsHeader ? (
-                <span className="bytes">累積 {step.totalBytes} B</span>
+                <span className="bytes">
+                  {t("cumulative", lang)} {step.totalBytes} B
+                </span>
               ) : (
-                <span className="bytes muted">ヘッダなし</span>
+                <span className="bytes muted">{t("noHeader", lang)}</span>
               )}
             </>
           )}
@@ -81,9 +85,9 @@ export default function LayerCard({ step, selected, active, reached, onClick }: 
                 setOpen((v) => !v);
               }}
             >
-              {open ? "▼ 実データを隠す" : "▶ この層での実データを見る"}
+              {open ? t("hideData", lang) : t("seeData", lang)}
             </button>
-            {open && <FrameView parts={step.frame} />}
+            {open && <FrameView parts={step.frame} lang={lang} />}
           </div>
         )}
       </div>
