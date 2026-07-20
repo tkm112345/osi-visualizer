@@ -14,10 +14,13 @@ export interface Protocol {
   key: string;
   l7Name: string;
   label: string;
+  category: string;
+  family: string;
   transport: string;
   port: number;
   tls: boolean;
   l3Protocol: string;
+  samplePayload: string;
   description: string;
 }
 

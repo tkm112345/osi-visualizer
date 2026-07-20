@@ -56,7 +56,8 @@ body {
 }
 
 .controls input,
-.controls select {
+.controls select,
+.controls textarea {
   background: var(--bg);
   border: 1px solid var(--panel-2);
   color: var(--text);
@@ -64,6 +65,25 @@ body {
   border-radius: 6px;
   font-size: 14px;
   min-width: 160px;
+}
+
+.controls input:disabled {
+  opacity: 0.4;
+}
+
+.controls .msg-field {
+  flex: 1 1 260px;
+}
+
+.controls textarea {
+  width: 100%;
+  font-family: monospace;
+  resize: vertical;
+}
+
+.proto-chip.warn {
+  background: #78350f;
+  color: #fde68a;
 }
 
 /* Protocol info banner */
@@ -125,6 +145,17 @@ body {
 .send-btn:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.stop-btn {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 14px;
 }
 
 .error {

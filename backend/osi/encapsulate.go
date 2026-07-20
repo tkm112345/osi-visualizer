@@ -78,10 +78,96 @@ func transportHeaders(p Protocol) (map[string]string, int) {
 	return map[string]string{"srcPort": "49152", "dstPort": port, "seq": "1", "flags": "PSH,ACK"}, tcpHeaderBytes
 }
 
+// serialFramingBytes は L2 でのフレーミング相当のバイト数（教育用の代表値）。
+func serialFramingBytes(p Protocol) int {
+	if p.Key == "i2c" {
+		return 1 // 7bit アドレス + R/W ≒ 1 バイト
+	}
+	return 0 // UART/SPI はビット単位の枠付けで、明確なヘッダバイトは持たない
+}
+
+// serialL2Headers / serialL1Headers はシリアル通信の L2/L1 表示を返す。
+func serialL2Headers(p Protocol) (map[string]string, string) {
+	switch p.Key {
+	case "uart":
+		return map[string]string{
+			"frame":  "Start(1) + Data(8) + Parity + Stop(1)",
+			"parity": "None",
+			"flow":   "None",
+		}, "1 バイトごとに Start/Stop ビットで枠付け（フレーミング）する。"
+	case "i2c":
+		return map[string]string{
+			"address": "0x3C (7bit)",
+			"rw":      "Write(0)",
+			"ack":     "ACK/NACK",
+		}, "先頭でスレーブアドレスと R/W を送り、各バイトで ACK を確認する。"
+	case "spi":
+		return map[string]string{
+			"chipSelect": "CS0 (Low)",
+			"mode":       "Mode 0 (CPOL=0, CPHA=0)",
+		}, "CS 線で通信相手のチップを選択する。アドレスの概念は無い。"
+	default:
+		return map[string]string{}, ""
+	}
+}
+
+func serialL1Info(p Protocol) ([]string, string) {
+	switch p.Key {
+	case "uart":
+		return []string{"信号線: TX / RX", "ボーレート: 9600 bps", "電圧レベル: 3.3V"}, "TX/RX の 2 線で、クロックを共有せず非同期にビットを送る。"
+	case "i2c":
+		return []string{"信号線: SDA / SCL", "配線: オープンドレイン + プルアップ", "クロック: 400 kHz"}, "SDA(データ)/SCL(クロック)の 2 線で通信する。"
+	case "spi":
+		return []string{"信号線: MOSI / MISO / SCLK / CS", "クロック: SCLK を共有"}, "複数線でクロックを共有し全二重で送受信する。"
+	default:
+		return nil, ""
+	}
+}
+
+// encapsulateSerial は UART/I2C/SPI など IP を使わない L1/L2 のみの通信を組み立てる。
+func encapsulateSerial(req Request, p Protocol) []Step {
+	framing := serialFramingBytes(p)
+	total := len(req.Message)
+	structure := "[Data]"
+	steps := make([]Step, 0, len(Layers))
+
+	for _, l := range Layers {
+		step := Step{
+			Level: l.Level, Name: l.Name, NameJa: l.NameJa, PDU: l.PDU,
+			AddsHeader: l.AddsHeader, Active: true,
+			Payload: req.Message, Headers: map[string]string{},
+		}
+		switch l.Level {
+		case 7, 6, 5, 4, 3:
+			step.Active = false
+			step.Note = p.L7Name + " は IP ネットワークを使わない。L3〜L7 は無く、L1/L2 だけで通信する。"
+		case 2:
+			headers, note := serialL2Headers(p)
+			step.Headers = headers
+			step.HeaderBytes = framing
+			total += framing
+			structure = "[" + p.L7Name + " " + structure + "]"
+			step.Note = note
+		case 1:
+			proc, note := serialL1Info(p)
+			step.Processing = proc
+			step.Note = note
+			step.Bitstream = toBits(req.Message, 4)
+		}
+		step.TotalBytes = total
+		step.Structure = structure
+		steps = append(steps, step)
+	}
+	return steps
+}
+
 // Encapsulate は入力メッセージを L7 → L1 へカプセル化した各ステップを返す。
 func Encapsulate(req Request) []Step {
 	req = normalize(req)
 	p := ProtocolByKey(req.Protocol)
+	if p.Family == "serial" {
+		return encapsulateSerial(req, p)
+	}
 	isPing := p.Transport == "ICMP"
 
 	total := len(req.Message)

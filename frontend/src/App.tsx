@@ -27,6 +27,7 @@ export default function App() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [playing, setPlaying] = useState(false);
 
   const timers = useRef<number[]>([]);
   function clearTimers() {
@@ -35,11 +36,54 @@ export default function App() {
   }
   useEffect(() => clearTimers, []);
 
+  // アニメーションを途中で停止する（現在の状態のまま固定される）。
+  function handleStop() {
+    clearTimers();
+    setPlaying(false);
+  }
+
+  // アニメーションせずに両ホストのスタックだけ取得して表示する。
+  async function loadStacks(msg: string, proto: string) {
+    try {
+      const req = { message: msg, srcIp, dstIp, protocol: proto };
+      const [enc, dec] = await Promise.all([encapsulate(req), decapsulate(req)]);
+      setEncapSteps(enc);
+      setDecapSteps(dec);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // 初回にプロトコル一覧を取得し、既定プロトコルのスタックを表示しておく。
   useEffect(() => {
     fetchProtocols()
-      .then(setProtocols)
-      .catch(() => setProtocols([]));
+      .then((list) => {
+        setProtocols(list);
+        const p = list.find((x) => x.key === "http") ?? list[0];
+        if (p) {
+          setProtocol(p.key);
+          setMessage(p.samplePayload);
+          loadStacks(p.samplePayload, p.key);
+        }
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // プロトコル変更時: サンプルペイロードに差し替え、スタックを再表示する。
+  function handleProtocolChange(key: string) {
+    clearTimers();
+    setPlaying(false);
+    setActiveA(null);
+    setActiveB(null);
+    setSelection(null);
+    setProtocol(key);
+    const p = protocols.find((x) => x.key === key);
+    const sample = p ? p.samplePayload : message;
+    setMessage(sample);
+    loadStacks(sample, key);
+  }
 
   async function handleSend() {
     setError(null);
@@ -53,6 +97,7 @@ export default function App() {
       const [enc, dec] = await Promise.all([encapsulate(req), decapsulate(req)]);
       setEncapSteps(enc);
       setDecapSteps(dec);
+      setPlaying(true);
 
       // フェーズ A: 送信ホストで L7 → L1（enc は L7→L1 順）
       enc.forEach((step, i) => {
@@ -74,23 +119,29 @@ export default function App() {
       const done = window.setTimeout(() => {
         setActiveA(null);
         setActiveB(null);
+        setPlaying(false);
       }, offset + dec.length * STEP_MS);
       timers.current.push(done);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setEncapSteps([]);
-      setDecapSteps([]);
     } finally {
       setLoading(false);
     }
   }
 
   const selectedProtocol = protocols.find((p) => p.key === protocol) ?? null;
+  const isSerial = selectedProtocol?.family === "serial";
   const started = encapSteps.length > 0;
   const activeSteps = selection?.host === "B" ? decapSteps : encapSteps;
   const selectedStep = selection
     ? activeSteps.find((s) => s.level === selection.level) ?? null
     : null;
+
+  // ドロップダウン用にカテゴリを出現順で並べる。
+  const categories: string[] = [];
+  protocols.forEach((p) => {
+    if (!categories.includes(p.category)) categories.push(p.category);
+  });
 
   return (
     <div className="app">
@@ -109,42 +160,64 @@ export default function App() {
       <section className="controls">
         <label>
           プロトコル
-          <select value={protocol} onChange={(e) => setProtocol(e.target.value)}>
-            {protocols.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.label}
-              </option>
+          <select value={protocol} onChange={(e) => handleProtocolChange(e.target.value)}>
+            {categories.map((cat) => (
+              <optgroup key={cat} label={cat}>
+                {protocols
+                  .filter((p) => p.category === cat)
+                  .map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.label}
+                    </option>
+                  ))}
+              </optgroup>
             ))}
           </select>
         </label>
-        <label>
-          メッセージ
-          <input value={message} onChange={(e) => setMessage(e.target.value)} />
+        <label className="msg-field">
+          メッセージ / ペイロード（テンプレート）
+          <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} />
         </label>
         <label>
           送信元 IP（ホスト A）
-          <input value={srcIp} onChange={(e) => setSrcIp(e.target.value)} />
+          <input value={srcIp} onChange={(e) => setSrcIp(e.target.value)} disabled={isSerial} />
         </label>
         <label>
           宛先 IP（ホスト B）
-          <input value={dstIp} onChange={(e) => setDstIp(e.target.value)} />
+          <input value={dstIp} onChange={(e) => setDstIp(e.target.value)} disabled={isSerial} />
         </label>
         <button className="send-btn" onClick={handleSend} disabled={loading}>
           {loading ? "処理中..." : "擬似送信 ▶ シミュレート"}
         </button>
+        {playing && (
+          <button className="stop-btn" onClick={handleStop}>
+            ■ 停止
+          </button>
+        )}
       </section>
 
       {selectedProtocol && (
         <div className="proto-info">
-          <span className="proto-chip">L7: {selectedProtocol.l7Name}</span>
-          <span className="proto-arrow">→</span>
-          <span className="proto-chip">
-            L4: {selectedProtocol.transport === "ICMP" ? "なし (ICMP)" : selectedProtocol.transport}
-            {selectedProtocol.port > 0 && ` :${selectedProtocol.port}`}
-          </span>
-          <span className="proto-arrow">→</span>
-          <span className="proto-chip">L3: {selectedProtocol.l3Protocol}</span>
-          {selectedProtocol.tls && <span className="proto-chip tls">L6: TLS 暗号化</span>}
+          {isSerial ? (
+            <>
+              <span className="proto-chip">L2: {selectedProtocol.l7Name} フレーム</span>
+              <span className="proto-arrow">→</span>
+              <span className="proto-chip">L1: 信号線</span>
+              <span className="proto-chip warn">L3〜L7 は使わない（IP なし）</span>
+            </>
+          ) : (
+            <>
+              <span className="proto-chip">L7: {selectedProtocol.l7Name}</span>
+              <span className="proto-arrow">→</span>
+              <span className="proto-chip">
+                L4: {selectedProtocol.transport === "ICMP" ? "なし (ICMP)" : selectedProtocol.transport}
+                {selectedProtocol.port > 0 && ` :${selectedProtocol.port}`}
+              </span>
+              <span className="proto-arrow">→</span>
+              <span className="proto-chip">L3: {selectedProtocol.l3Protocol}</span>
+              {selectedProtocol.tls && <span className="proto-chip tls">L6: TLS 暗号化</span>}
+            </>
+          )}
           <span className="proto-desc">{selectedProtocol.description}</span>
         </div>
       )}
@@ -160,7 +233,7 @@ export default function App() {
       <main className="main">
         <div className="stacks">
           {!started ? (
-            <p className="placeholder">「擬似送信」を押すと両ホストのレイヤースタックが表示されます。</p>
+            <p className="placeholder">レイヤースタックを読み込み中...</p>
           ) : (
             <div className="two-hosts">
               <div className="host-col">

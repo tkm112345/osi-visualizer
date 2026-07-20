@@ -8,9 +8,54 @@ import (
 // Decapsulate は受信ホスト視点で、届いたフレームを L1 → L7 へ
 // デカプセル化（ヘッダを解析して外していく）各ステップを返す。
 // 選択プロトコルにより L4(TCP/UDP) の有無や ICMP かどうかが変わる。あくまで擬似。
+// decapsulateSerial は受信側のシリアル通信（L1 → L2 のみ）を組み立てる。
+func decapsulateSerial(req Request, p Protocol) []Step {
+	framing := serialFramingBytes(p)
+	remaining := len(req.Message) + framing
+	structure := "[" + p.L7Name + " [Data]]"
+	steps := make([]Step, 0, len(Layers))
+
+	for i := len(Layers) - 1; i >= 0; i-- {
+		l := Layers[i]
+		step := Step{
+			Level: l.Level, Name: l.Name, NameJa: l.NameJa, PDU: l.PDU,
+			AddsHeader: l.AddsHeader, Active: true,
+			Payload: req.Message, Headers: map[string]string{},
+		}
+		switch l.Level {
+		case 1:
+			proc, note := serialL1Info(p)
+			step.Processing = proc
+			step.Note = note
+			step.Bitstream = toBits(req.Message, 4)
+		case 2:
+			headers, _ := serialL2Headers(p)
+			step.Headers = headers
+			step.HeaderBytes = framing
+			remaining -= framing
+			structure = "[Data]"
+			if p.Key == "i2c" {
+				step.Note = "自分のアドレス宛か確認し、ACK を返してデータを受け取る。"
+			} else {
+				step.Note = "Start/Stop ビットの枠を外し、1 バイトを取り出す。"
+			}
+		case 3, 4, 5, 6, 7:
+			step.Active = false
+			step.Note = p.L7Name + " は IP を使わないため、L3〜L7 の処理は無い。"
+		}
+		step.TotalBytes = remaining
+		step.Structure = structure
+		steps = append(steps, step)
+	}
+	return steps
+}
+
 func Decapsulate(req Request) []Step {
 	req = normalize(req)
 	p := ProtocolByKey(req.Protocol)
+	if p.Family == "serial" {
+		return decapsulateSerial(req, p)
+	}
 	isPing := p.Transport == "ICMP"
 
 	// 送信側で積み上がった最終サイズから逆算して「フル装備」の初期値を求める。

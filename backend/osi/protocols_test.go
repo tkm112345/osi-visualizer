@@ -67,6 +67,38 @@ func TestEncapDecapSymmetryAllProtocols(t *testing.T) {
 	}
 }
 
+// シリアル通信(UART/I2C/SPI)は L3〜L7 を使わず L1/L2 のみ。
+func TestSerialProtocolsUseOnlyL1L2(t *testing.T) {
+	for _, key := range []string{"uart", "i2c", "spi"} {
+		steps := Encapsulate(Request{Message: "Hi", Protocol: key})
+		for _, s := range steps {
+			active := s.Level == 1 || s.Level == 2
+			if s.Active != active {
+				t.Errorf("%s L%d active=%v, want %v", key, s.Level, s.Active, active)
+			}
+		}
+	}
+}
+
+// すべてのプロトコルにサンプルペイロードがある。
+func TestAllProtocolsHaveSamplePayload(t *testing.T) {
+	for _, p := range Protocols {
+		if p.SamplePayload == "" {
+			t.Errorf("protocol %s has empty SamplePayload", p.Key)
+		}
+	}
+}
+
+// HTTP/HTTPS のサンプルは HTML テンプレート。
+func TestHTTPSamplePayloadIsHTML(t *testing.T) {
+	for _, key := range []string{"http", "https"} {
+		p := ProtocolByKey(key)
+		if !contains(p.SamplePayload, "<!DOCTYPE html>") {
+			t.Errorf("%s SamplePayload should be HTML, got %q", key, p.SamplePayload)
+		}
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
