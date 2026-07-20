@@ -99,8 +99,12 @@ export default function App() {
       setDecapSteps(dec);
       setPlaying(true);
 
+      // 使用しない層（UART の L3〜L7 など）はアニメーションを飛ばす。
+      const encActive = enc.filter((s) => s.active);
+      const decActive = dec.filter((s) => s.active);
+
       // フェーズ A: 送信ホストで L7 → L1（enc は L7→L1 順）
-      enc.forEach((step, i) => {
+      encActive.forEach((step, i) => {
         const t = window.setTimeout(() => {
           setActiveA(step.level);
           setActiveB(null);
@@ -108,8 +112,8 @@ export default function App() {
         timers.current.push(t);
       });
       // フェーズ B: 受信ホストで L1 → L7（dec は L1→L7 順）
-      const offset = enc.length * STEP_MS;
-      dec.forEach((step, j) => {
+      const offset = encActive.length * STEP_MS;
+      decActive.forEach((step, j) => {
         const t = window.setTimeout(() => {
           setActiveA(null);
           setActiveB(step.level);
@@ -120,7 +124,7 @@ export default function App() {
         setActiveA(null);
         setActiveB(null);
         setPlaying(false);
-      }, offset + dec.length * STEP_MS);
+      }, offset + decActive.length * STEP_MS);
       timers.current.push(done);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

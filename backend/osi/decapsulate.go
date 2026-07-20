@@ -15,6 +15,13 @@ func decapsulateSerial(req Request, p Protocol) []Step {
 	structure := "[" + p.L7Name + " [Data]]"
 	steps := make([]Step, 0, len(Layers))
 
+	// frame: 受信したフレーム全体（フレーミング + データ）。L2 で枠を外す。
+	cur := []FramePart{
+		hdr(p.L7Name+" フレーミング", serialL2Detail(p), framing),
+		{Label: payloadLabel(p), Detail: req.Message, Kind: "payload", Bytes: len(req.Message)},
+	}
+	snapshot := func() []FramePart { return append([]FramePart{}, cur...) }
+
 	for i := len(Layers) - 1; i >= 0; i-- {
 		l := Layers[i]
 		step := Step{
@@ -39,12 +46,16 @@ func decapsulateSerial(req Request, p Protocol) []Step {
 			} else {
 				step.Note = "Start/Stop ビットの枠を外し、1 バイトを取り出す。"
 			}
+			cur = cur[1:] // フレーミングを外す
 		case 3, 4, 5, 6, 7:
 			step.Active = false
 			step.Note = p.L7Name + " は IP を使わないため、L3〜L7 の処理は無い。"
 		}
 		step.TotalBytes = remaining
 		step.Structure = structure
+		if step.Active {
+			step.Frame = snapshot()
+		}
 		steps = append(steps, step)
 	}
 	return steps
@@ -81,6 +92,28 @@ func Decapsulate(req Request) []Step {
 	steps := make([]Step, 0, len(Layers))
 	port := strconv.Itoa(p.Port)
 
+	// frame: 受信フレーム全体を組み立て、上位層へ進むごとにヘッダを外していく。
+	plDetail := req.Message
+	plLabel := payloadLabel(p)
+	if p.TLS {
+		plDetail = tlsEncrypted(req.Message)
+		plLabel = "ペイロード (TLS暗号化)"
+	}
+	cur := []FramePart{
+		hdr("Ethernet ヘッダ", ethDetail(), ethHeaderBytes),
+		hdr("IP ヘッダ", ipDetail(req, p), ipHeaderBytes),
+	}
+	if isPing {
+		cur = append(cur, hdr("ICMP ヘッダ", icmpDetail(), icmpHeaderBytes))
+	} else if p.Transport == "UDP" {
+		cur = append(cur, hdr("UDP ヘッダ", udpDetail(p, len(req.Message)), udpHeaderBytes))
+	} else {
+		cur = append(cur, hdr("TCP ヘッダ", tcpDetail(p), tcpHeaderBytes))
+	}
+	cur = append(cur, FramePart{Label: plLabel, Detail: plDetail, Kind: "payload", Bytes: len(req.Message)})
+	cur = append(cur, FramePart{Label: "FCS (CRC32)", Detail: "0x1A2B3C4D", Kind: "trailer", Bytes: ethTrailer})
+	snapshot := func() []FramePart { return append([]FramePart{}, cur...) }
+
 	// Layers は L7→L1 順なので、受信側は逆順（L1→L7）に走査する。
 	for i := len(Layers) - 1; i >= 0; i-- {
 		l := Layers[i]
@@ -116,6 +149,7 @@ func Decapsulate(req Request) []Step {
 				structure = fmt.Sprintf("[IP [%s [Data]]]", p.Transport)
 			}
 			step.Note = "宛先 MAC が自分宛かを確認し、FCS で誤りがないか検査。Ethernet ヘッダを外す。"
+			cur = cur[1 : len(cur)-1] // Eth ヘッダと FCS を外す
 
 		case 3:
 			step.Headers = map[string]string{
@@ -130,11 +164,13 @@ func Decapsulate(req Request) []Step {
 				step.Headers["icmpType"] = "8 (Echo Request)"
 				structure = "[Data]"
 				step.Note = "宛先 IP を確認。ICMP Echo Request と判別し、Echo Reply を返す（擬似）。L4 は無い。"
+				cur = cur[2:] // IP ヘッダと ICMP ヘッダを外す
 			} else {
 				remaining -= ipHeaderBytes
 				step.HeaderBytes = ipHeaderBytes
 				structure = fmt.Sprintf("[%s [Data]]", p.Transport)
 				step.Note = "宛先 IP が自分宛かを確認し、上位プロトコルを判別。IP ヘッダを外す。"
+				cur = cur[1:] // IP ヘッダを外す
 			}
 
 		case 4:
@@ -155,6 +191,7 @@ func Decapsulate(req Request) []Step {
 				remaining -= hb
 				structure = "[Data]"
 				step.Note = fmt.Sprintf("宛先ポート %d から対応アプリへ振り分け（逆多重化）。%s%s ヘッダを外す。", p.Port, order, p.Transport)
+				cur = cur[1:] // トランスポートヘッダを外す
 			}
 
 		case 5:
@@ -174,6 +211,11 @@ func Decapsulate(req Request) []Step {
 				step.Processing = []string{"文字コード復元 (UTF-8)"}
 				if p.TLS {
 					step.Processing = append([]string{"TLS 復号"}, step.Processing...)
+					// 暗号文のペイロードを平文に戻す。
+					if n := len(cur); n > 0 {
+						cur[n-1].Label = payloadLabel(p)
+						cur[n-1].Detail = req.Message
+					}
 				}
 				step.Note = "送信側で行った変換を元に戻す。"
 			}
@@ -190,6 +232,9 @@ func Decapsulate(req Request) []Step {
 
 		step.TotalBytes = remaining
 		step.Structure = structure
+		if step.Active {
+			step.Frame = snapshot()
+		}
 		steps = append(steps, step)
 	}
 

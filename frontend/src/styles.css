@@ -376,6 +376,79 @@ body {
   color: #64748b;
 }
 
+/* Frame accordion (per-layer actual data) */
+.frame-accordion {
+  margin-top: 8px;
+}
+
+.frame-toggle {
+  background: transparent;
+  border: 1px solid var(--panel-2);
+  color: var(--accent);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.frame-toggle:hover {
+  background: var(--bg);
+}
+
+.frame-view {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.frame-part {
+  border: 1px solid var(--panel-2);
+  border-left: 4px solid var(--muted);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 6px 8px;
+}
+
+.frame-part.header {
+  border-left-color: #f59e0b;
+}
+
+.frame-part.payload {
+  border-left-color: var(--accent);
+}
+
+.frame-part.trailer {
+  border-left-color: #ef4444;
+}
+
+.frame-part-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.frame-part-label {
+  font-weight: 700;
+}
+
+.frame-part-tag {
+  color: var(--muted);
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.frame-part-detail {
+  margin: 4px 0 0;
+  font-family: monospace;
+  font-size: 12px;
+  color: #7dd3fc;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* Detail panel */
 .detail {
   background: var(--panel);
