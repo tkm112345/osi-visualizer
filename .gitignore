@@ -1,0 +1,25 @@
+# --- Node / frontend ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# --- Go / backend ---
+# Compiled binaries
+osi-visualizer
+backend/osi-visualizer
+*.exe
+*.out
+# Go workspace file
+go.work
+go.work.sum
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- Logs ---
+*.log
