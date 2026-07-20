@@ -31,25 +31,44 @@ func handleLayers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, osi.Layers)
 }
 
-func handleEncapsulate(w http.ResponseWriter, r *http.Request) {
+// decodeRequest は POST ボディを osi.Request にデコードする共通処理。
+// 2 つ目の戻り値が false のときは既にエラーレスポンスを書き終えている。
+func decodeRequest(w http.ResponseWriter, r *http.Request) (osi.Request, bool) {
+	var req osi.Request
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
-		return
+		return req, false
 	}
-	var req osi.Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-		return
+		return req, false
 	}
 	if req.Message == "" {
 		req.Message = "Hello"
 	}
+	return req, true
+}
+
+func handleEncapsulate(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeRequest(w, r)
+	if !ok {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"steps": osi.Encapsulate(req)})
+}
+
+func handleDecapsulate(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeRequest(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"steps": osi.Decapsulate(req)})
 }
 
 func main() {
 	http.HandleFunc("/api/layers", withCORS(handleLayers))
 	http.HandleFunc("/api/encapsulate", withCORS(handleEncapsulate))
+	http.HandleFunc("/api/decapsulate", withCORS(handleDecapsulate))
 
 	addr := ":8080"
 	log.Printf("OSI Visualizer backend listening on %s", addr)

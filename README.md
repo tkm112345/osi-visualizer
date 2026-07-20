@@ -1,19 +1,25 @@
-# OSI Model Visualizer
+# OSI 通信シミュレーター (OSI Model Visualizer)
 
 [![CI](https://github.com/tkm112345/osi-visualizer/actions/workflows/ci.yml/badge.svg)](https://github.com/tkm112345/osi-visualizer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-OSI 参照モデルを学ぶための Web アプリ。データが **L7 → L1 へカプセル化**されていく様子を可視化し、各レイヤーをクリックすると付与されるヘッダや処理内容が確認できる。
+OSI 参照モデルを学ぶための Web アプリ。**送信ホスト**でデータが L7 → L1 へ**カプセル化**され、
+**受信ホスト**で L1 → L7 へ**デカプセル化**される様子を可視化する。各レイヤーをクリックすると付与／除去されるヘッダや処理内容が確認できる。
+
+> ⚠️ **これは擬似シミュレーションです。** 実際にネットワークへパケットを送信することは一切ありません。
+> 宛先 IP は表示上のラベルで、ソケットも開かず通信は発生しません。ローカルの Go サーバが教材データを計算して返すだけです。
 
 - **フロントエンド**: React + Vite + TypeScript
 - **バックエンド**: Go（標準ライブラリのみ）
 
 ## 特徴
 
-- L1〜L7 を下から積み上げ表示。「送信」ボタンでカプセル化アニメーションが走る。
+- 送信ホスト A（L7→L1）と受信ホスト B（L1→L7）を左右に並べ、送信→受信を連続アニメーション。
+- L1〜L7 を積み上げ表示。カプセル化でヘッダが増え、デカプセル化で外れていく様子が見える。
 - **L5（セッション）/ L6（プレゼンテーション）も表示**。これらは独立ヘッダを付けず「処理内容」を明示することで、
   OSI（理論）と TCP/IP（実装）のギャップまで学べる。
-- 各レイヤーのヘッダ・PDU・累積バイト数・カプセル化構造 `[Eth [IP [TCP [Data]]]]` を表示。
+- 受信側は宛先 MAC/IP の確認・ポートによるアプリ振り分けなど、**受信ホスト特有の処理**も表示。
+- 各レイヤーのヘッダ・PDU・累積バイト数・構造 `[Eth [IP [TCP [Data]]]]` を表示。
 
 ### カプセル化のイメージ
 
@@ -62,7 +68,8 @@ cd backend && go test ./...
 | メソッド | パス | 説明 |
 |---------|------|------|
 | GET  | `/api/layers` | 全 7 層の静的メタ情報 |
-| POST | `/api/encapsulate` | `{message, srcIp, dstIp}` を受け取り L7→L1 の各ステップを返す |
+| POST | `/api/encapsulate` | `{message, srcIp, dstIp}` を受け取り送信側 L7→L1 の各ステップを返す |
+| POST | `/api/decapsulate` | 同じ入力から受信側 L1→L7 の各ステップ（擬似）を返す |
 
 ## プロジェクト構成
 

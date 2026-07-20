@@ -1,65 +1,98 @@
 import { useEffect, useRef, useState } from "react";
-import { encapsulate } from "./api";
+import { decapsulate, encapsulate } from "./api";
 import type { Step } from "./types";
 import LayerStack from "./components/LayerStack";
 import PacketDetail from "./components/PacketDetail";
+
+type Host = "A" | "B";
+interface Selection {
+  host: Host;
+  level: number;
+}
+
+const STEP_MS = 600;
 
 export default function App() {
   const [message, setMessage] = useState("Hello");
   const [srcIp, setSrcIp] = useState("192.168.0.10");
   const [dstIp, setDstIp] = useState("93.184.216.34");
 
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
-  const [activeLevel, setActiveLevel] = useState<number | null>(null);
+  const [encapSteps, setEncapSteps] = useState<Step[]>([]);
+  const [decapSteps, setDecapSteps] = useState<Step[]>([]);
+  const [activeA, setActiveA] = useState<number | null>(null);
+  const [activeB, setActiveB] = useState<number | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const timers = useRef<number[]>([]);
-
   function clearTimers() {
     timers.current.forEach((t) => window.clearTimeout(t));
     timers.current = [];
   }
-
   useEffect(() => clearTimers, []);
 
   async function handleSend() {
     setError(null);
     setLoading(true);
-    setSelectedLevel(null);
+    setSelection(null);
     clearTimers();
+    setActiveA(null);
+    setActiveB(null);
     try {
-      const result = await encapsulate({ message, srcIp, dstIp });
-      setSteps(result);
-      // L7 → L1 へ順にハイライトするアニメーション。
-      setActiveLevel(7);
-      result.forEach((step, i) => {
+      const req = { message, srcIp, dstIp };
+      const [enc, dec] = await Promise.all([encapsulate(req), decapsulate(req)]);
+      setEncapSteps(enc);
+      setDecapSteps(dec);
+
+      // フェーズ A: 送信ホストで L7 → L1（enc は L7→L1 順）
+      enc.forEach((step, i) => {
         const t = window.setTimeout(() => {
-          setActiveLevel(step.level);
-          if (i === result.length - 1) {
-            const done = window.setTimeout(() => setActiveLevel(null), 600);
-            timers.current.push(done);
-          }
-        }, i * 600);
+          setActiveA(step.level);
+          setActiveB(null);
+        }, i * STEP_MS);
         timers.current.push(t);
       });
+      // フェーズ B: 受信ホストで L1 → L7（dec は L1→L7 順）
+      const offset = enc.length * STEP_MS;
+      dec.forEach((step, j) => {
+        const t = window.setTimeout(() => {
+          setActiveA(null);
+          setActiveB(step.level);
+        }, offset + j * STEP_MS);
+        timers.current.push(t);
+      });
+      const done = window.setTimeout(() => {
+        setActiveA(null);
+        setActiveB(null);
+      }, offset + dec.length * STEP_MS);
+      timers.current.push(done);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setSteps([]);
+      setEncapSteps([]);
+      setDecapSteps([]);
     } finally {
       setLoading(false);
     }
   }
 
-  const selectedStep = steps.find((s) => s.level === selectedLevel) ?? null;
+  const started = encapSteps.length > 0;
+  const activeSteps = selection?.host === "B" ? decapSteps : encapSteps;
+  const selectedStep = selection
+    ? activeSteps.find((s) => s.level === selection.level) ?? null
+    : null;
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>OSI Model Visualizer</h1>
+        <h1>OSI 通信シミュレーター</h1>
         <p className="subtitle">
-          データが L7 → L1 へカプセル化されていく様子を可視化します。各レイヤーをクリックすると詳細が見られます。
+          送信ホスト（カプセル化 L7→L1）と受信ホスト（デカプセル化 L1→L7）で、
+          データがどう処理されるかを可視化します。各レイヤーをクリックすると詳細が見られます。
+        </p>
+        <p className="sim-note">
+          ⚠️ これは<strong>擬似シミュレーション</strong>です。実際にネットワークへパケットを送信することはありません。
+          宛先 IP は表示上のラベルで、通信は一切発生しません。
         </p>
       </header>
 
@@ -69,15 +102,15 @@ export default function App() {
           <input value={message} onChange={(e) => setMessage(e.target.value)} />
         </label>
         <label>
-          送信元 IP
+          送信元 IP（ホスト A）
           <input value={srcIp} onChange={(e) => setSrcIp(e.target.value)} />
         </label>
         <label>
-          宛先 IP
+          宛先 IP（ホスト B）
           <input value={dstIp} onChange={(e) => setDstIp(e.target.value)} />
         </label>
         <button className="send-btn" onClick={handleSend} disabled={loading}>
-          {loading ? "送信中..." : "送信 ↓ カプセル化"}
+          {loading ? "処理中..." : "擬似送信 ▶ シミュレート"}
         </button>
       </section>
 
@@ -90,24 +123,48 @@ export default function App() {
       )}
 
       <main className="main">
-        <div className="stack-col">
-          {steps.length === 0 ? (
-            <p className="placeholder">「送信」を押すとレイヤースタックが表示されます。</p>
+        <div className="stacks">
+          {!started ? (
+            <p className="placeholder">「擬似送信」を押すと両ホストのレイヤースタックが表示されます。</p>
           ) : (
-            <>
-              <div className="direction-label">▲ 上位層（アプリに近い）</div>
-              <LayerStack
-                steps={steps}
-                selectedLevel={selectedLevel}
-                activeLevel={activeLevel}
-                onSelect={setSelectedLevel}
-              />
-              <div className="direction-label">▼ 下位層（物理媒体へ）</div>
-            </>
+            <div className="two-hosts">
+              <div className="host-col">
+                <div className="host-title send">送信ホスト A ▼ カプセル化</div>
+                <LayerStack
+                  steps={encapSteps}
+                  mode="encap"
+                  selectedLevel={selection?.host === "A" ? selection.level : null}
+                  activeLevel={activeA}
+                  onSelect={(level) => setSelection({ host: "A", level })}
+                />
+              </div>
+
+              <div className="wire" aria-hidden>
+                <div className="wire-line" />
+                <div className="wire-label">物理媒体（擬似）</div>
+              </div>
+
+              <div className="host-col">
+                <div className="host-title recv">受信ホスト B ▲ デカプセル化</div>
+                <LayerStack
+                  steps={decapSteps}
+                  mode="decap"
+                  selectedLevel={selection?.host === "B" ? selection.level : null}
+                  activeLevel={activeB}
+                  onSelect={(level) => setSelection({ host: "B", level })}
+                />
+              </div>
+            </div>
           )}
         </div>
+
         <aside className="detail-col">
-          <PacketDetail step={selectedStep} />
+          {selection && (
+            <div className="detail-host-tag">
+              {selection.host === "A" ? "送信ホスト A" : "受信ホスト B"}
+            </div>
+          )}
+          <PacketDetail step={selectedStep} mode={selection?.host === "B" ? "decap" : "encap"} />
         </aside>
       </main>
     </div>

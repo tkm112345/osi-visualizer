@@ -2,9 +2,10 @@ import type { Step } from "../types";
 
 interface Props {
   step: Step | null;
+  mode: "encap" | "decap";
 }
 
-export default function PacketDetail({ step }: Props) {
+export default function PacketDetail({ step, mode }: Props) {
   if (!step) {
     return (
       <div className="detail empty">
@@ -12,6 +13,9 @@ export default function PacketDetail({ step }: Props) {
       </div>
     );
   }
+
+  const headerLabel =
+    mode === "encap" ? "このレイヤーで付与するヘッダ" : "このレイヤーで解析・除去するヘッダ";
 
   const headerEntries = Object.entries(step.headers);
 
@@ -31,7 +35,7 @@ export default function PacketDetail({ step }: Props) {
 
       {step.addsHeader ? (
         <section>
-          <h3>このレイヤーで付与するヘッダ</h3>
+          <h3>{headerLabel}</h3>
           {headerEntries.length > 0 ? (
             <table className="header-table">
               <tbody>
