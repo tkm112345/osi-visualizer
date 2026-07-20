@@ -24,6 +24,14 @@ export interface Protocol {
   description: string;
 }
 
+// FramePart は、ある層での PDU を構成する 1 区画（ヘッダ / ペイロード / トレーラ）。
+export interface FramePart {
+  label: string;
+  detail: string;
+  kind: "header" | "payload" | "trailer";
+  bytes: number;
+}
+
 export interface Step {
   level: number;
   name: string;
@@ -39,6 +47,7 @@ export interface Step {
   structure: string;
   note: string;
   bitstream: string;
+  frame: FramePart[];
 }
 
 export interface EncapsulateRequest {

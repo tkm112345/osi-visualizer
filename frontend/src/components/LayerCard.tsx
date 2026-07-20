@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { Step } from "../types";
+import FrameView from "./FrameView";
 
 interface Props {
   step: Step;
@@ -20,6 +22,7 @@ const LEVEL_COLORS: Record<number, string> = {
 };
 
 export default function LayerCard({ step, selected, active, reached, onClick }: Props) {
+  const [open, setOpen] = useState(false);
   const color = LEVEL_COLORS[step.level] ?? "#888";
   const inactive = step.active === false;
   const classes = ["layer-card"];
@@ -29,11 +32,21 @@ export default function LayerCard({ step, selected, active, reached, onClick }: 
   if (!step.addsHeader) classes.push("no-header");
   if (inactive) classes.push("inactive");
 
+  const hasFrame = !inactive && step.frame && step.frame.length > 0;
+
   return (
-    <button
+    <div
       className={classes.join(" ")}
       style={{ borderLeftColor: color }}
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
     >
       <div className="layer-badge" style={{ background: color }}>
         L{step.level}
@@ -59,7 +72,21 @@ export default function LayerCard({ step, selected, active, reached, onClick }: 
             </>
           )}
         </div>
+        {hasFrame && (
+          <div className="frame-accordion">
+            <button
+              className="frame-toggle"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen((v) => !v);
+              }}
+            >
+              {open ? "▼ 実データを隠す" : "▶ この層での実データを見る"}
+            </button>
+            {open && <FrameView parts={step.frame} />}
+          </div>
+        )}
       </div>
-    </button>
+    </div>
   );
 }

@@ -127,28 +127,28 @@ var Protocols = []Protocol{
 	{
 		Key: "ping", L7Name: "ICMP Echo", Label: "Ping — 疎通確認 (ICMP)",
 		Category: "診断", Family: "ip", Transport: "ICMP", Port: 0, L3Protocol: "ICMP(1)",
-		SamplePayload: "abcdefghijklmnop",
-		Description:   "L3 の機能。L4(TCP/UDP)・L7 を使わず、IP の直上に ICMP が乗る。",
+		SamplePayload: "abcdefghijklmnopqrstuvwabcdefghi",
+		Description:   "L3 の機能。L4(TCP/UDP)・L7 を使わず、IP の直上に ICMP が乗る。ペイロードは疎通確認用の 32B ダミー。",
 	},
 
 	// --- シリアル通信（L1-L2 のみ・IP を使わない） ---
 	{
 		Key: "uart", L7Name: "UART", Label: "UART — 非同期シリアル通信",
 		Category: "シリアル通信 (L1-L2)", Family: "serial", Transport: "Serial",
-		SamplePayload: "Hi",
-		Description:   "IP を使わない。1 バイトを Start/Data/Parity/Stop ビットで囲んで TX/RX 線で送る。",
+		SamplePayload: "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M*47",
+		Description:   "IP を使わない。1 バイトを Start/Data/Parity/Stop ビットで囲んで TX/RX 線で送る。例は GPS の NMEA センテンス。",
 	},
 	{
 		Key: "i2c", L7Name: "I2C", Label: "I2C — 2 線式バス通信",
 		Category: "シリアル通信 (L1-L2)", Family: "serial", Transport: "Serial",
-		SamplePayload: "reg=0x00 data=0x1F",
-		Description:   "IP を使わない。SDA/SCL の 2 線でデバイスアドレス指定して通信するバス。",
+		SamplePayload: "ADDR=0x76 REG=0xF7 READ 6B → 温度/気圧レジスタ",
+		Description:   "IP を使わない。SDA/SCL の 2 線でデバイスアドレス指定して通信するバス。例は BME280 気圧センサの測定値読み出し。",
 	},
 	{
 		Key: "spi", L7Name: "SPI", Label: "SPI — 高速同期シリアル",
 		Category: "シリアル通信 (L1-L2)", Family: "serial", Transport: "Serial",
-		SamplePayload: "0x9F (Read ID)",
-		Description:   "IP を使わない。MOSI/MISO/SCLK/CS の複数線でチップを選択して全二重通信する。",
+		SamplePayload: "MOSI: 9F 00 00 00  MISO: -- EF 40 18 (JEDEC ID)",
+		Description:   "IP を使わない。MOSI/MISO/SCLK/CS の複数線でチップを選択して全二重通信する。例は SPI フラッシュの JEDEC ID 読み出し。",
 	},
 }
 

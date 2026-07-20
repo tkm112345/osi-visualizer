@@ -14,6 +14,15 @@ type Request struct {
 	Protocol string `json:"protocol"` // Protocols の key（空なら http）
 }
 
+// FramePart は、ある層でのPDUを構成する 1 区画（ヘッダ / ペイロード / トレーラ）。
+// アコーディオンで「実際どんなデータになっているか」を見せるために使う。
+type FramePart struct {
+	Label  string `json:"label"`  // 例: "IP ヘッダ", "ペイロード (HTML)"
+	Detail string `json:"detail"` // 実際のフィールド値やペイロード内容
+	Kind   string `json:"kind"`   // "header" | "payload" | "trailer"
+	Bytes  int    `json:"bytes"`
+}
+
 // Step は 1 レイヤーでの処理結果を表す。L7 → L1 の順に積み上がる。
 type Step struct {
 	Level       int               `json:"level"`
@@ -30,6 +39,41 @@ type Step struct {
 	Structure   string            `json:"structure"`
 	Note        string            `json:"note"`
 	Bitstream   string            `json:"bitstream"`
+	Frame       []FramePart       `json:"frame"` // この層でのPDU構造（実データ）
+}
+
+func payloadLabel(p Protocol) string {
+	switch p.Key {
+	case "http", "https", "websocket":
+		return "ペイロード (本文)"
+	case "ping":
+		return "ICMP データ"
+	default:
+		return "ペイロード (" + p.L7Name + ")"
+	}
+}
+
+// tlsEncrypted は TLS 暗号化後の見かけ（教育用のダミー表現）を返す。
+func tlsEncrypted(msg string) string {
+	return fmt.Sprintf("🔒 Application Data (%dB, TLS暗号化されており中身は読めない)", len(msg))
+}
+
+func tcpDetail(p Protocol) string {
+	return fmt.Sprintf("srcPort=49152  dstPort=%d  seq=1  ack=1  flags=PSH,ACK  win=64240", p.Port)
+}
+func udpDetail(p Protocol, dataLen int) string {
+	return fmt.Sprintf("srcPort=49152  dstPort=%d  length=%d  checksum=0x1a2b", p.Port, udpHeaderBytes+dataLen)
+}
+func ipDetail(req Request, p Protocol) string {
+	return fmt.Sprintf("version=4  ihl=5  ttl=64  proto=%s  src=%s  dst=%s", p.L3Protocol, req.SrcIP, req.DstIP)
+}
+func icmpDetail() string { return "type=8 (Echo Request)  code=0  id=0x0001  seq=1" }
+func ethDetail() string {
+	return "dst=11:22:33:44:55:66  src=AA:BB:CC:DD:EE:01  ethertype=0x0800"
+}
+
+func hdr(label, detail string, bytes int) FramePart {
+	return FramePart{Label: label, Detail: detail, Kind: "header", Bytes: bytes}
 }
 
 // 各レイヤーが付与するヘッダのバイト数（教育用の代表値）。
@@ -124,12 +168,29 @@ func serialL1Info(p Protocol) ([]string, string) {
 	}
 }
 
+// serialL2Detail は L2 フレーミングの実データ表現を返す。
+func serialL2Detail(p Protocol) string {
+	switch p.Key {
+	case "uart":
+		return "各バイトを Start(1) + Data(8) + Stop(1) ビットで枠付け, Parity=None"
+	case "i2c":
+		return "Start + Address(0x76,7bit) + R/W(0) + ACK ... 各バイト後に ACK"
+	case "spi":
+		return "CS=Low で選択, SCLK に同期して MOSI/MISO を全二重送受信"
+	default:
+		return ""
+	}
+}
+
 // encapsulateSerial は UART/I2C/SPI など IP を使わない L1/L2 のみの通信を組み立てる。
 func encapsulateSerial(req Request, p Protocol) []Step {
 	framing := serialFramingBytes(p)
 	total := len(req.Message)
 	structure := "[Data]"
 	steps := make([]Step, 0, len(Layers))
+
+	pl := FramePart{Label: payloadLabel(p), Detail: req.Message, Kind: "payload", Bytes: len(req.Message)}
+	var hdrs []FramePart
 
 	for _, l := range Layers {
 		step := Step{
@@ -148,6 +209,7 @@ func encapsulateSerial(req Request, p Protocol) []Step {
 			total += framing
 			structure = "[" + p.L7Name + " " + structure + "]"
 			step.Note = note
+			hdrs = append([]FramePart{hdr(p.L7Name+" フレーミング", serialL2Detail(p), framing)}, hdrs...)
 		case 1:
 			proc, note := serialL1Info(p)
 			step.Processing = proc
@@ -156,6 +218,10 @@ func encapsulateSerial(req Request, p Protocol) []Step {
 		}
 		step.TotalBytes = total
 		step.Structure = structure
+		if step.Active {
+			out := append([]FramePart{}, hdrs...)
+			step.Frame = append(out, pl)
+		}
 		steps = append(steps, step)
 	}
 	return steps
@@ -173,6 +239,19 @@ func Encapsulate(req Request) []Step {
 	total := len(req.Message)
 	structure := "[Data]"
 	steps := make([]Step, 0, len(Layers))
+
+	// frame は「その層での実データ構造」を組み立てるための状態。
+	pl := FramePart{Label: payloadLabel(p), Detail: req.Message, Kind: "payload", Bytes: len(req.Message)}
+	var hdrs []FramePart
+	var trailer *FramePart
+	buildFrame := func() []FramePart {
+		out := append([]FramePart{}, hdrs...)
+		out = append(out, pl)
+		if trailer != nil {
+			out = append(out, *trailer)
+		}
+		return out
+	}
 
 	for _, l := range Layers {
 		step := Step{
@@ -204,7 +283,9 @@ func Encapsulate(req Request) []Step {
 				step.Processing = []string{"文字コード変換 (UTF-8)"}
 				if p.TLS {
 					step.Processing = append([]string{"TLS による暗号化"}, step.Processing...)
-					step.Note = p.L7Name + " なので、この層で TLS 暗号化が行われる。"
+					step.Note = p.L7Name + " なので、この層で TLS 暗号化が行われる。以降ペイロードは暗号文になる。"
+					pl.Detail = tlsEncrypted(req.Message)
+					pl.Label = "ペイロード (TLS暗号化)"
 				} else {
 					step.Note = "独立したヘッダは付与しない。TCP/IP モデルでは Application 層に含まれる。"
 				}
@@ -230,6 +311,11 @@ func Encapsulate(req Request) []Step {
 				total += hb
 				structure = "[" + p.Transport + " " + structure + "]"
 				step.Note = fmt.Sprintf("ポート %d でアプリを識別。%s ヘッダ(%dB)を付与する。", p.Port, p.Transport, hb)
+				detail := tcpDetail(p)
+				if p.Transport == "UDP" {
+					detail = udpDetail(p, len(req.Message))
+				}
+				hdrs = append([]FramePart{hdr(p.Transport+" ヘッダ", detail, hb)}, hdrs...)
 			}
 
 		case 3:
@@ -247,12 +333,14 @@ func Encapsulate(req Request) []Step {
 				step.Headers["icmpCode"] = "0"
 				step.HeaderBytes = icmpHeaderBytes + ipHeaderBytes
 				step.Note = "ICMP Echo Request を作り、IP ヘッダを付与する。TCP/UDP は挟まらない。"
+				hdrs = append([]FramePart{hdr("ICMP ヘッダ", icmpDetail(), icmpHeaderBytes)}, hdrs...)
 			} else {
 				step.HeaderBytes = ipHeaderBytes
 				step.Note = "IP アドレスを付与し、ネットワーク間の経路制御を可能にする。"
 			}
 			total += ipHeaderBytes
 			structure = "[IP " + structure + "]"
+			hdrs = append([]FramePart{hdr("IP ヘッダ", ipDetail(req, p), ipHeaderBytes)}, hdrs...)
 
 		case 2:
 			step.Headers = map[string]string{
@@ -265,6 +353,8 @@ func Encapsulate(req Request) []Step {
 			total += ethHeaderBytes + ethTrailer
 			structure = "[Eth " + structure + " FCS]"
 			step.Note = "MAC アドレスを付与してフレーム化。末尾に FCS（誤り検出）も付く。"
+			hdrs = append([]FramePart{hdr("Ethernet ヘッダ", ethDetail(), ethHeaderBytes)}, hdrs...)
+			trailer = &FramePart{Label: "FCS (CRC32)", Detail: "0x1A2B3C4D", Kind: "trailer", Bytes: ethTrailer}
 
 		case 1:
 			step.Processing = []string{"ビット列を電気/光/電波の信号に変換"}
@@ -274,6 +364,9 @@ func Encapsulate(req Request) []Step {
 
 		step.TotalBytes = total
 		step.Structure = structure
+		if step.Active {
+			step.Frame = buildFrame()
+		}
 		steps = append(steps, step)
 	}
 
