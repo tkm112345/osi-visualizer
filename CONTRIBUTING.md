@@ -1,6 +1,6 @@
 # Contributing to OSI Model Visualizer
 
-このプロジェクトへの貢献に興味を持っていただきありがとうございます。学習用途のシンプルなプロジェクトなので、気軽に Issue / Pull Request を送ってください。
+このプロジェクトへの貢献に興味を持っていただきありがとうございます。気軽に Issue / Pull Request を送ってください。
 
 ## 開発環境
 
